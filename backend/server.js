@@ -1,3 +1,4 @@
+// ... (keep existing imports)
 const fastify = require('fastify')({ 
     logger: true,
     bodyLimit: 50 * 1024 * 1024 // LIMIT INCREASED TO 50MB for large CSV imports
@@ -442,7 +443,6 @@ fastify.post('/lists', async (req) => {
         const { error: errItems } = await supabase.from('list_items').insert(chunk);
         if (errItems) {
              console.error(`Error inserting batch ${i}:`, errItems);
-             // We continue trying other chunks or throw? Throwing is safer for data integrity awareness.
              throw errItems;
         }
     }
@@ -464,11 +464,42 @@ fastify.delete('/lists/:id', async (req) => {
     return { success: true };
 });
 
-// Get List Items
+// Get List Items (FULL FETCH - No 1000 limit)
 fastify.get('/lists/:id/items', async (req) => {
     const { id } = req.params;
-    const { data } = await supabase.from('list_items').select('*').eq('list_id', id); // Select * to get ID for edits
-    return data;
+    
+    // Initialize array to hold all items
+    let allItems = [];
+    let from = 0;
+    const limit = 1000;
+    let fetchMore = true;
+
+    // Loop until we get all rows
+    while (fetchMore) {
+        const { data, error } = await supabase
+            .from('list_items')
+            .select('*')
+            .eq('list_id', id)
+            .range(from, from + limit - 1); // 0-999, 1000-1999, etc.
+
+        if (error) {
+            console.error("Error fetching list items:", error);
+            throw error;
+        }
+
+        if (data && data.length > 0) {
+            allItems = allItems.concat(data);
+            from += limit;
+            // If we got fewer rows than the limit, we've reached the end
+            if (data.length < limit) {
+                fetchMore = false;
+            }
+        } else {
+            fetchMore = false;
+        }
+    }
+
+    return allItems;
 });
 
 // Add Single Item to List

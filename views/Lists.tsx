@@ -2,6 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { Trash2, Users, Calendar, Search, Loader2, Database, ArrowLeft, Plus, Edit2, Save, X, ChevronLeft, ChevronRight, Phone } from 'lucide-react';
 
+// Helper: Récupère une valeur dans un objet JSON peu importe la casse (Nom, nom, NAME...)
+const smartGet = (data: any, ...candidates: string[]) => {
+    if (!data || typeof data !== 'object') return '';
+    
+    // 1. Cherche correspondance exacte
+    for (const key of candidates) {
+        if (data[key] !== undefined && data[key] !== null && data[key] !== '') return data[key];
+    }
+
+    // 2. Cherche correspondance insensible à la casse
+    const lowerCandidates = candidates.map(c => c.toLowerCase());
+    for (const key of Object.keys(data)) {
+        if (lowerCandidates.includes(key.toLowerCase())) {
+             const val = data[key];
+             if (val !== undefined && val !== null && val !== '') return val;
+        }
+    }
+    return '';
+};
+
 export const Lists: React.FC = () => {
     // VIEW STATE: 'list' (grid) or 'detail' (table)
     const [viewMode, setViewMode] = useState<'list' | 'detail'>('list');
@@ -51,7 +71,6 @@ export const Lists: React.FC = () => {
         setCurrentPage(1);
         try {
             const items = await api.getListItems(list.id);
-            // Items arrive as { id, phone, data: { Nom:..., Ville:... } }
             setListItems(items);
         } catch (e) {
             alert("Erreur chargement contacts");
@@ -96,23 +115,28 @@ export const Lists: React.FC = () => {
 
     const startEditing = (item: any) => {
         setEditingItemId(item.id);
-        // Flatten structure for editing: { nom, ville, ... }
+        
+        // On initialise l'édition avec les clés normalisées pour éviter de perdre les données
+        // tout en gardant les autres champs éventuels
         setEditValues({
+            ...item.data, // Garde tout ce qu'il y a dans data
             phone: item.phone,
-            ...item.data
+            // Force les clés standard pour les inputs
+            Nom: smartGet(item.data, 'Nom', 'nom', 'Name', 'name'),
+            Ville: smartGet(item.data, 'Ville', 'ville', 'City', 'city'),
+            URL: smartGet(item.data, 'URL', 'url', 'link', 'Lien'),
+            Spécialité: smartGet(item.data, 'Spécialité', 'specialite', 'speciality', 'Specialite')
         });
     };
 
     const saveEdit = async (itemId: string) => {
         try {
-            // Reconstruct payload
             const phone = editValues.phone;
             const data = { ...editValues };
-            delete data.phone; // phone is separate
+            delete data.phone; 
 
             await api.updateListItem(itemId, phone, data);
             
-            // Update local state
             setListItems(prev => prev.map(item => {
                 if (item.id === itemId) {
                     return { ...item, phone, data };
@@ -151,10 +175,13 @@ export const Lists: React.FC = () => {
 
     const filteredItems = listItems.filter(item => {
         const search = itemSearch.toLowerCase();
+        const nom = smartGet(item.data, 'Nom', 'nom', 'Name').toLowerCase();
+        const ville = smartGet(item.data, 'Ville', 'ville', 'City').toLowerCase();
+        
         return (
             (item.phone && item.phone.includes(search)) ||
-            (item.data?.Nom && item.data.Nom.toLowerCase().includes(search)) ||
-            (item.data?.Ville && item.data.Ville.toLowerCase().includes(search))
+            (nom && nom.includes(search)) ||
+            (ville && ville.includes(search))
         );
     });
 
@@ -217,6 +244,12 @@ export const Lists: React.FC = () => {
                                     {paginatedItems.map((item, i) => {
                                         const isEditing = editingItemId === item.id;
                                         const realIndex = (currentPage - 1) * rowsPerPage + i;
+                                        
+                                        // Extraction intelligente des données
+                                        const displayNom = smartGet(item.data, 'Nom', 'nom', 'Name', 'name', 'Cabinet');
+                                        const displayVille = smartGet(item.data, 'Ville', 'ville', 'City', 'city', 'Address');
+                                        const displayURL = smartGet(item.data, 'URL', 'url', 'link', 'Lien', 'Dossier');
+                                        const displaySpec = smartGet(item.data, 'Spécialité', 'specialite', 'speciality', 'Specialite');
 
                                         return (
                                             <tr key={item.id} className="hover:bg-slate-50 group">
@@ -226,7 +259,7 @@ export const Lists: React.FC = () => {
                                                 <td className="p-4 font-medium text-slate-900">
                                                     {isEditing ? (
                                                         <input className="w-full p-1 border rounded" value={editValues.Nom || ''} onChange={e => setEditValues({...editValues, Nom: e.target.value})} />
-                                                    ) : (item.data?.Nom || '-')}
+                                                    ) : (displayNom || '-')}
                                                 </td>
 
                                                 {/* PHONE */}
@@ -240,14 +273,14 @@ export const Lists: React.FC = () => {
                                                 <td className="p-4">
                                                     {isEditing ? (
                                                         <input className="w-full p-1 border rounded" value={editValues.Ville || ''} onChange={e => setEditValues({...editValues, Ville: e.target.value})} />
-                                                    ) : (item.data?.Ville || '-')}
+                                                    ) : (displayVille || '-')}
                                                 </td>
 
                                                 {/* URL */}
                                                 <td className="p-4 text-blue-600 truncate max-w-[150px]">
                                                     {isEditing ? (
                                                         <input className="w-full p-1 border rounded" value={editValues.URL || ''} onChange={e => setEditValues({...editValues, URL: e.target.value})} />
-                                                    ) : (item.data?.URL || '-')}
+                                                    ) : (displayURL || '-')}
                                                 </td>
 
                                                  {/* SPECIALITE */}
@@ -255,7 +288,7 @@ export const Lists: React.FC = () => {
                                                     {isEditing ? (
                                                         <input className="w-full p-1 border rounded" value={editValues.Spécialité || ''} onChange={e => setEditValues({...editValues, Spécialité: e.target.value})} />
                                                     ) : (
-                                                        item.data?.Spécialité ? <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold">{item.data.Spécialité}</span> : '-'
+                                                        displaySpec ? <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs font-bold">{displaySpec}</span> : '-'
                                                     )}
                                                 </td>
 
