@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Smartphone, RefreshCw, Wifi, WifiOff, Battery, ShieldCheck, LogOut } from 'lucide-react';
+import { Smartphone, RefreshCw, Wifi, WifiOff, Battery, ShieldCheck, LogOut, AlertCircle } from 'lucide-react';
 import { InstanceState } from '../types';
 import { api } from '../services/api';
 
@@ -17,18 +17,24 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
     let interval = setInterval(async () => {
         try {
             const status = await api.getInstanceStatus();
-            // Only update if status changed to avoid re-renders or if we are connecting
+            // Only update if status changed to avoid re-renders
             if (status.status !== instance.status || (status.status === 'connected' && instance.batteryLevel !== status.batteryLevel)) {
                 setInstance(status);
-                if (status.status === 'connected') setQrCode(null);
+            }
+            // Always update QR if it exists and we are pairing (it might have rotated)
+            if (status.status === 'pairing' && status.qrCode) {
+                 setQrCode(status.qrCode);
+            }
+            if (status.status === 'connected') {
+                setQrCode(null);
             }
         } catch (e) {
             console.error("Connection lost to backend");
         }
-    }, 3000); // Check every 3 seconds
+    }, 2000); // Faster poll for QR updates
 
     return () => clearInterval(interval);
-  }, [instance.status, setInstance]);
+  }, [instance.status, instance.batteryLevel, setInstance]);
 
   const handleDisconnect = async () => {
     if (confirm("Are you sure you want to disconnect?")) {
@@ -42,16 +48,10 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
   const handleReconnect = async () => {
     setLoading(true);
     try {
-        const { qrCode } = await api.initSession();
-        setQrCode(qrCode);
+        // We trigger init, but we rely on the polling (useEffect) to get the actual QR image
+        // This prevents race conditions where init returns 'pairing' but QR isn't generated yet
+        await api.initSession();
         setInstance(prev => ({ ...prev, status: 'pairing' }));
-        
-        // SIMULATION ONLY: Automatically connect after 5s for demo purposes
-        // In real life, the user scans, and the polling useEffect picks up the change
-        setTimeout(() => {
-            api._simulateConnectionSuccess(); 
-        }, 5000);
-
     } catch (e) {
         alert("Failed to reach backend server");
     } finally {
@@ -92,8 +92,8 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
                     <div className="h-8 w-px bg-slate-200"></div>
                     <div className="flex-1">
                       <p className="text-xs text-slate-500 uppercase tracking-wide">Device</p>
-                      <p className="font-semibold text-slate-900">{instance.phoneName}</p>
-                      <p className="text-xs text-slate-500">{instance.platform} • Baileys MD</p>
+                      <p className="font-semibold text-slate-900">{instance.phoneName || 'Linked Device'}</p>
+                      <p className="text-xs text-slate-500">{instance.platform || 'WhatsApp Web'} • Baileys MD</p>
                     </div>
                   </div>
                </div>
@@ -124,24 +124,28 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
           ) : (
             <div className="flex flex-col items-center text-center">
               {instance.status === 'pairing' ? (
-                 <div className="bg-white p-4 rounded-xl shadow-lg border border-slate-200 mb-6 relative">
-                    {/* Simulated QR Code or Real QR if Base64 provided */}
-                    <div className="w-64 h-64 bg-slate-900 flex items-center justify-center overflow-hidden">
-                       {qrCode && qrCode !== 'MOCK_QR_CODE_BASE64' ? (
-                           <img src={qrCode} alt="Scan me" className="w-full h-full object-contain" />
-                       ) : (
-                           // Fallback mock visualization
-                           <div className="grid grid-cols-12 grid-rows-12 gap-0.5 w-full h-full p-2 opacity-50">
-                               {Array.from({length: 144}).map((_, i) => (
-                                 <div key={i} className={`bg-white ${Math.random() > 0.5 ? 'opacity-100' : 'opacity-0'}`}></div>
-                               ))}
-                           </div>
-                       )}
-                    </div>
-                    <div className="mt-4 flex items-center justify-center gap-2 text-slate-600 text-sm animate-pulse">
-                      <RefreshCw size={14} className="animate-spin" />
-                      Waiting for scan...
-                    </div>
+                 <div className="flex flex-col items-center animate-in fade-in duration-500">
+                     <div className="bg-white p-4 rounded-xl shadow-xl border border-slate-200 mb-6 relative">
+                        {/* High Contrast Container for QR */}
+                        <div className="w-[280px] h-[280px] bg-white flex items-center justify-center overflow-hidden border-4 border-white">
+                           {qrCode && qrCode !== 'MOCK_QR_CODE_BASE64' ? (
+                               <img 
+                                src={qrCode} 
+                                alt="Scan with WhatsApp" 
+                                className="w-full h-full object-contain rendering-pixelated" 
+                               />
+                           ) : (
+                               <div className="flex flex-col items-center gap-3 text-slate-400">
+                                   <RefreshCw size={32} className="animate-spin text-blue-500" />
+                                   <span className="text-sm font-medium">Generating QR...</span>
+                               </div>
+                           )}
+                        </div>
+                     </div>
+                     <div className="flex items-center gap-2 text-slate-600 text-sm bg-slate-100 px-4 py-2 rounded-full mb-4">
+                        <AlertCircle size={16} />
+                        <span>Increase your screen brightness for better scanning</span>
+                     </div>
                  </div>
               ) : (
                 <div className="mb-8 p-6 bg-slate-50 rounded-full">
@@ -150,19 +154,19 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
               )}
 
               <h3 className="text-xl font-bold text-slate-900 mb-2">
-                {instance.status === 'pairing' ? 'Scan QR Code with WhatsApp' : 'Instance Disconnected'}
+                {instance.status === 'pairing' ? 'Scan QR Code' : 'Instance Disconnected'}
               </h3>
               <p className="text-slate-500 max-w-md mb-8">
                 {instance.status === 'pairing' 
-                  ? 'Open WhatsApp > Settings > Linked Devices. Scan the code to link this Gateway to the Render Server.'
-                  : 'Start the handshake to generate a QR code from the backend.'}
+                  ? 'Open WhatsApp on your phone > Settings > Linked Devices > Link a Device. Point your camera at the code above.'
+                  : 'Start the handshake to generate a secure QR code from the backend.'}
               </p>
 
               {instance.status === 'disconnected' && (
                 <button 
                   onClick={handleReconnect}
                   disabled={loading}
-                  className="bg-emerald-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-emerald-700 shadow-lg shadow-emerald-200 flex items-center gap-2 transition-all"
+                  className="bg-emerald-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-emerald-700 shadow-lg shadow-emerald-200 flex items-center gap-2 transition-all hover:-translate-y-0.5"
                 >
                    {loading ? <RefreshCw className="animate-spin" /> : <Wifi />}
                    Connect to Server

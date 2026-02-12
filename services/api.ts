@@ -4,11 +4,10 @@ import { Campaign, InstanceState, WorkerStatus } from '../types';
 // CONFIGURATION CRITIQUE
 // ---------------------------------------------------------------------------
 // 1. Mettre à FALSE pour utiliser le vrai serveur Render
-const MOCK_MODE = true; 
+const MOCK_MODE = false; 
 
 // 2. Mettre ici l'URL que Render te donnera (ex: https://mon-api.onrender.com)
-// Pour le développement local, garde http://localhost:3000
-const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000';
+const API_URL = 'https://whatsapp-gateway-vigf.onrender.com';
 // ---------------------------------------------------------------------------
 
 
