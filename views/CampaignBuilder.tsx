@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { FileSpreadsheet, ArrowRight, Wand2, Users, Save, PlayCircle, Settings, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { FileSpreadsheet, ArrowRight, Keyboard, Users, Save, PlayCircle, Settings, AlertCircle, CheckCircle, Loader2, Plus, Trash2 } from 'lucide-react';
 import Papa from 'papaparse';
 import { Campaign } from '../types';
 import { api } from '../services/api';
@@ -10,22 +10,37 @@ interface CampaignBuilderProps {
 
 export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampaign }) => {
   const [step, setStep] = useState(1);
+  
+  // Step 1: Input Method
+  const [inputMethod, setInputMethod] = useState<'file' | 'manual'>('file');
   const [file, setFile] = useState<File | null>(null);
+  const [manualContacts, setManualContacts] = useState<{phone: string, name: string, info: string}[]>([]);
+  const [manualInput, setManualInput] = useState({ phone: '', name: '', info: '' });
+
+  // Data State
   const [csvData, setCsvData] = useState<any[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<{ [key: string]: string }>({});
-  const [isLaunching, setIsLaunching] = useState(false);
   
-  const [campaignName, setCampaignName] = useState("My Medical Campaign " + new Date().toLocaleDateString());
-  const [template, setTemplate] = useState("{Bonjour|Salam} Dr {{Nom}}, j'ai vu que vous êtes {{Spécialité}}. C'est intéressant.");
+  // Launch State
+  const [isLaunching, setIsLaunching] = useState(false);
+  const [campaignName, setCampaignName] = useState("Campaign " + new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString().slice(0,5));
+  const [template, setTemplate] = useState("{Bonjour|Salam} {{Name}}, ...");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- HANDLERS ---
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
     if (uploadedFile) {
       setFile(uploadedFile);
-      Papa.parse(uploadedFile, {
+      parseCSV(uploadedFile);
+    }
+  };
+
+  const parseCSV = (file: File) => {
+      Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
@@ -42,7 +57,30 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
           alert("Error parsing CSV file.");
         }
       });
-    }
+  };
+
+  const addManualContact = () => {
+      if (!manualInput.phone) return alert("Phone number is required");
+      setManualContacts([...manualContacts, { ...manualInput }]);
+      setManualInput({ phone: '', name: '', info: '' });
+  };
+
+  const removeManualContact = (index: number) => {
+      setManualContacts(manualContacts.filter((_, i) => i !== index));
+  };
+
+  const proceedFromManual = () => {
+      if (manualContacts.length === 0) return alert("Add at least one contact");
+      
+      // Convert manual object to 'CSV-like' structure
+      setCsvData(manualContacts);
+      setHeaders(['phone', 'name', 'info']);
+      setMapping({
+          'phone': 'phone',
+          'name': 'Nom',
+          'info': 'Custom1'
+      });
+      setStep(2);
   };
 
   const handleMappingChange = (header: string, variable: string) => {
@@ -80,7 +118,6 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
     
     setIsLaunching(true);
     try {
-        // Send actual data to backend to process the queue
         const campaignData = {
             name: campaignName,
             contacts: csvData,
@@ -96,22 +133,22 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
     }
   };
 
-  // Auto-guess mapping for phone
-  React.useEffect(() => {
-    if (headers.length > 0) {
+  // Auto-guess mapping for phone in File mode
+  useEffect(() => {
+    if (inputMethod === 'file' && headers.length > 0) {
       const phoneHeader = headers.find(h => h.toLowerCase().includes('tele') || h.toLowerCase().includes('phone') || h.toLowerCase().includes('mobile'));
       if (phoneHeader) {
         setMapping(prev => ({ ...prev, [phoneHeader]: 'phone' }));
       }
     }
-  }, [headers]);
+  }, [headers, inputMethod]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 pb-20">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-900">New Campaign Wizard</h2>
+        <h2 className="text-2xl font-bold text-slate-900">Campaign Wizard</h2>
         <div className="flex items-center gap-2 text-sm text-slate-500">
-           <span className={step >= 1 ? "text-blue-600 font-bold" : ""}>1. Upload</span>
+           <span className={step >= 1 ? "text-blue-600 font-bold" : ""}>1. Source</span>
            <span className="text-slate-300">/</span>
            <span className={step >= 2 ? "text-blue-600 font-bold" : ""}>2. Mapping</span>
            <span className="text-slate-300">/</span>
@@ -120,40 +157,141 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px]">
+        
+        {/* STEP 1: UPLOAD OR MANUAL */}
         {step === 1 && (
-          <div className="p-12 flex flex-col items-center justify-center text-center h-full">
-             <div className="w-20 h-20 bg-blue-50 rounded-full flex items-center justify-center mb-6">
-                <FileSpreadsheet size={40} className="text-blue-600" />
+          <div className="p-8 h-full flex flex-col">
+             <div className="flex gap-4 justify-center mb-8">
+                 <button 
+                    onClick={() => setInputMethod('file')}
+                    className={`flex items-center gap-2 px-6 py-3 rounded-lg border transition-all ${inputMethod === 'file' ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                 >
+                    <FileSpreadsheet size={20} />
+                    Upload CSV
+                 </button>
+                 <button 
+                    onClick={() => setInputMethod('manual')}
+                    className={`flex items-center gap-2 px-6 py-3 rounded-lg border transition-all ${inputMethod === 'manual' ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
+                 >
+                    <Keyboard size={20} />
+                    Manual Entry
+                 </button>
              </div>
-             <h3 className="text-xl font-semibold text-slate-900 mb-2">Upload Contact List (CSV)</h3>
-             <p className="text-slate-500 mb-8 max-w-md">
-               File must include phone numbers (international format 212...) and variables for personalization.
-             </p>
-             <label className="cursor-pointer bg-white border-2 border-dashed border-slate-300 rounded-xl p-8 hover:border-blue-500 hover:bg-blue-50 transition-all w-full max-w-lg group">
-                <input 
-                  type="file" 
-                  accept=".csv"
-                  className="hidden" 
-                  ref={fileInputRef}
-                  onChange={handleFileUpload} 
-                />
-                <div className="text-center group-hover:scale-105 transition-transform">
-                  <span className="text-blue-600 font-medium text-lg">Click to upload CSV</span>
-                </div>
-                <div className="text-xs text-slate-400 mt-2">Max 5000 contacts recommended</div>
-             </label>
-             <div className="mt-8 text-sm text-slate-400">
-                <p>Don't have a file? <button onClick={() => {
-                    const mockData = "Nom,Telephone,Spécialité\nDr Alami,212661000000,Cardiologue\nDr Bennis,212662000000,Généraliste";
-                    const blob = new Blob([mockData], { type: 'text/csv' });
-                    const file = new File([blob], "demo_contacts.csv", { type: 'text/csv' });
-                    setFile(file);
-                    Papa.parse(file, { header: true, complete: (r) => { setCsvData(r.data); setHeaders(r.meta.fields || []); setStep(2); } });
-                }} className="text-blue-500 hover:underline">Use demo data</button></p>
-             </div>
+
+             {inputMethod === 'file' ? (
+                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors p-12">
+                    <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
+                        <FileSpreadsheet size={32} className="text-blue-600" />
+                    </div>
+                    <h3 className="text-lg font-medium text-slate-900 mb-2">Drag & Drop your CSV file here</h3>
+                    <p className="text-slate-500 mb-6 text-sm max-w-sm text-center">Ensure your file has a header row. Columns like "Phone", "Name" are recommended.</p>
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-200"
+                    >
+                        Browse Files
+                    </button>
+                    <input 
+                      type="file" 
+                      accept=".csv"
+                      className="hidden" 
+                      ref={fileInputRef}
+                      onChange={handleFileUpload} 
+                    />
+                 </div>
+             ) : (
+                 <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
+                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
+                         <div className="grid grid-cols-12 gap-3 mb-2">
+                             <div className="col-span-4">
+                                 <label className="text-xs font-semibold text-slate-500 uppercase">Phone (Required)</label>
+                                 <input 
+                                    type="text" 
+                                    placeholder="212661..." 
+                                    className="w-full mt-1 p-2 border border-slate-300 rounded text-sm"
+                                    value={manualInput.phone}
+                                    onChange={e => setManualInput({...manualInput, phone: e.target.value})}
+                                 />
+                             </div>
+                             <div className="col-span-4">
+                                 <label className="text-xs font-semibold text-slate-500 uppercase">Name</label>
+                                 <input 
+                                    type="text" 
+                                    placeholder="Dr Alami" 
+                                    className="w-full mt-1 p-2 border border-slate-300 rounded text-sm"
+                                    value={manualInput.name}
+                                    onChange={e => setManualInput({...manualInput, name: e.target.value})}
+                                 />
+                             </div>
+                             <div className="col-span-3">
+                                 <label className="text-xs font-semibold text-slate-500 uppercase">Info/Spec</label>
+                                 <input 
+                                    type="text" 
+                                    placeholder="Cardio" 
+                                    className="w-full mt-1 p-2 border border-slate-300 rounded text-sm"
+                                    value={manualInput.info}
+                                    onChange={e => setManualInput({...manualInput, info: e.target.value})}
+                                 />
+                             </div>
+                             <div className="col-span-1 flex items-end">
+                                 <button 
+                                    onClick={addManualContact}
+                                    className="w-full p-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 flex justify-center"
+                                 >
+                                     <Plus size={20} />
+                                 </button>
+                             </div>
+                         </div>
+                     </div>
+
+                     <div className="flex-1 border rounded-lg overflow-hidden bg-white mb-4 overflow-y-auto max-h-[300px]">
+                         <table className="w-full text-sm text-left">
+                             <thead className="bg-slate-100 text-slate-600">
+                                 <tr>
+                                     <th className="p-3">Phone</th>
+                                     <th className="p-3">Name</th>
+                                     <th className="p-3">Info</th>
+                                     <th className="p-3 w-10"></th>
+                                 </tr>
+                             </thead>
+                             <tbody>
+                                 {manualContacts.length === 0 ? (
+                                     <tr>
+                                         <td colSpan={4} className="p-8 text-center text-slate-400">No contacts added yet.</td>
+                                     </tr>
+                                 ) : (
+                                     manualContacts.map((c, i) => (
+                                         <tr key={i} className="border-t border-slate-100">
+                                             <td className="p-3 font-mono text-slate-700">{c.phone}</td>
+                                             <td className="p-3">{c.name}</td>
+                                             <td className="p-3">{c.info}</td>
+                                             <td className="p-3">
+                                                 <button onClick={() => removeManualContact(i)} className="text-red-400 hover:text-red-600">
+                                                     <Trash2 size={16} />
+                                                 </button>
+                                             </td>
+                                         </tr>
+                                     ))
+                                 )}
+                             </tbody>
+                         </table>
+                     </div>
+
+                     <div className="flex justify-end">
+                         <button 
+                            onClick={proceedFromManual}
+                            disabled={manualContacts.length === 0}
+                            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                         >
+                             Next Step <ArrowRight size={16} />
+                         </button>
+                     </div>
+                 </div>
+             )}
           </div>
         )}
 
+        {/* STEP 2: MAPPING */}
         {step === 2 && (
           <div className="p-8">
             <h3 className="text-lg font-semibold mb-4">Variable Mapping</h3>
@@ -163,7 +301,7 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
               <table className="w-full text-sm text-left">
                 <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
                   <tr>
-                    <th className="p-4 w-1/3">CSV Column Header</th>
+                    <th className="p-4 w-1/3">Column Header</th>
                     <th className="p-4 w-1/3">First Row Preview</th>
                     <th className="p-4 w-1/3">Map To Variable</th>
                   </tr>
@@ -217,6 +355,7 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
           </div>
         )}
 
+        {/* STEP 3: TEMPLATE */}
         {step === 3 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 h-full">
             <div className="p-8 border-r border-slate-100 flex flex-col">
@@ -248,7 +387,7 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                   value={template}
                   onChange={(e) => setTemplate(e.target.value)}
                   className="w-full flex-1 min-h-[200px] p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm leading-relaxed"
-                  placeholder="Hello {{Nom}}..."
+                  placeholder="Hello {{Name}}..."
                ></textarea>
                <div className="mt-2 text-xs text-slate-500 flex justify-between">
                  <span>Use <code>{`{Option A|Option B}`}</code> for Spintax.</span>
@@ -264,7 +403,9 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                   <div className="absolute inset-0 opacity-10 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')]"></div>
                   
                   <div className="relative self-start bg-white p-3 rounded-lg shadow-sm rounded-tl-none max-w-[90%] text-sm text-slate-800 leading-snug mb-2">
-                     <div className="font-bold text-xs text-orange-400 mb-1">+212 {csvData[0] ? (csvData[0][Object.keys(mapping).find(key => mapping[key] === 'phone') || ''] || '...').replace(/\D/g,'').slice(-9) : '...'}</div>
+                     <div className="font-bold text-xs text-orange-400 mb-1">
+                        +212 {csvData[0] ? (csvData[0][Object.keys(mapping).find(key => mapping[key] === 'phone') || ''] || '...').replace(/\D/g,'').slice(-9) : '...'}
+                     </div>
                      <p className="whitespace-pre-wrap">{getPreview()}</p>
                      <div className="text-[10px] text-slate-400 text-right mt-1 flex items-center justify-end gap-1">
                         10:42 AM <CheckCircle size={10} className="text-blue-400" />

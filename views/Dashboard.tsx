@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Play, Pause, OctagonX, Activity, Send, MessageSquare, AlertTriangle, 
-  Smartphone, Coffee, UserCheck, Terminal, PlusCircle 
+  Smartphone, Coffee, UserCheck, Terminal, CheckCircle2, XCircle, Clock
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { StatCard } from '../components/StatCard';
@@ -22,6 +22,14 @@ const MOCK_CHART_DATA = [
   { time: '15:00', sent: 0, failed: 0 },
 ];
 
+interface TransmissionLog {
+    id: string;
+    phone: string;
+    status: 'sent' | 'failed' | 'pending';
+    time: string;
+    info?: string;
+}
+
 export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaignUpdate, instanceStatus }) => {
   const [workerState, setWorkerState] = useState<WorkerStatus>({
     state: 'idle',
@@ -31,6 +39,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
 
   const [logs, setLogs] = useState<WorkerLog[]>([]);
   const [chartData, setChartData] = useState(MOCK_CHART_DATA);
+  const [transmissionLogs, setTransmissionLogs] = useState<TransmissionLog[]>([]);
 
   // Simulate worker activity visually if campaign is running and instance connected
   useEffect(() => {
@@ -50,6 +59,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
         let nextDelay = 0;
         let logMsg: WorkerLog | null = null;
         let updateCampaign = false;
+        let newTransmission: TransmissionLog | null = null;
+        
+        // Mock Phone Number generator
+        const mockPhone = `+212 6${Math.floor(Math.random()*80)+10} ${Math.floor(Math.random()*99)} ${Math.floor(Math.random()*99)} ${Math.floor(Math.random()*99)}`;
 
         switch (prev.state) {
           case 'idle':
@@ -60,46 +73,65 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
           case 'fetching':
             nextState = 'checking_presence';
             nextDelay = 1;
-            // logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'info', message: 'Fetching next contact from BullMQ...' };
             break;
           case 'checking_presence':
             nextState = 'typing';
-            nextDelay = 4;
-            // logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'info', message: 'Presence Check: WhatsApp account exists.' };
+            nextDelay = 3;
             break;
           case 'typing':
             nextState = 'sending';
             nextDelay = 1;
-            logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'typing', message: `Simulating human typing for +2126...${Math.floor(Math.random()*9000)+1000}` };
+            logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'typing', message: `Typing for ${prev.currentContact || mockPhone}...` };
             break;
           case 'sending':
             nextState = 'waiting';
             nextDelay = Math.floor(Math.random() * 5) + 5; // Faster for demo purposes
             updateCampaign = true;
-            logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'success', message: 'Message dispatched successfully.' };
+            const isSuccess = Math.random() > 0.05; // 95% success rate mock
+            logMsg = { 
+                id: Date.now().toString(), 
+                timestamp: new Date().toLocaleTimeString(), 
+                type: isSuccess ? 'success' : 'error', 
+                message: isSuccess ? 'Message dispatched.' : 'Failed to send.' 
+            };
+            
+            newTransmission = {
+                id: Date.now().toString(),
+                phone: prev.currentContact || mockPhone,
+                status: isSuccess ? 'sent' : 'failed',
+                time: new Date().toLocaleTimeString(),
+                info: isSuccess ? 'Delivered' : 'Invalid Number'
+            };
             break;
         }
+
+        // Store current contact so it persists through typing->sending
+        const currentContact = nextState === 'fetching' ? mockPhone : prev.currentContact;
 
         if (updateCampaign && activeCampaign) {
             onCampaignUpdate({
                 ...activeCampaign,
-                sentCount: activeCampaign.sentCount + 1
+                sentCount: (activeCampaign.sentCount || 0) + (logMsg?.type === 'success' ? 1 : 0),
+                failedCount: (activeCampaign.failedCount || 0) + (logMsg?.type === 'error' ? 1 : 0)
             });
             // Update chart data roughly
             setChartData(curr => {
                 const newData = [...curr];
                 const last = newData[newData.length -1];
-                last.sent += 1;
+                if (logMsg?.type === 'success') last.sent += 1;
+                else last.failed += 1;
                 return newData;
             });
         }
 
         if (logMsg) setLogs(prevLogs => [logMsg!, ...prevLogs].slice(0, 50));
+        if (newTransmission) setTransmissionLogs(prev => [newTransmission!, ...prev].slice(0, 20));
         
         return {
           ...prev,
           state: nextState,
-          nextActionIn: nextDelay
+          nextActionIn: nextDelay,
+          currentContact: currentContact
         };
       });
     }, 1000);
@@ -121,157 +153,182 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
     }, ...prev]);
   };
 
-  const getStatusBadge = () => {
-    const styles = {
-      idle: 'bg-slate-100 text-slate-600',
-      fetching: 'bg-blue-100 text-blue-600',
-      checking_presence: 'bg-purple-100 text-purple-600',
-      typing: 'bg-amber-100 text-amber-600 animate-pulse',
-      waiting: 'bg-slate-100 text-slate-500',
-      sending: 'bg-green-100 text-green-600',
-      cooldown: 'bg-orange-100 text-orange-600',
-      stopped: 'bg-red-100 text-red-600',
-    };
-    return styles[workerState.state] || styles.idle;
-  };
-
-  const getStatusLabel = () => {
-    const labels = {
-      idle: 'Idle',
-      fetching: 'Queue Fetch',
-      checking_presence: 'Checking',
-      typing: 'Typing...',
-      waiting: `Wait (${workerState.nextActionIn}s)`,
-      sending: 'Sending',
-      cooldown: 'Break',
-      stopped: 'STOPPED',
-    };
-    return labels[workerState.state] || 'Unknown';
-  };
-
   if (!activeCampaign) {
       return (
-          <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-4">
-              <div className="bg-slate-100 p-6 rounded-full">
-                  <Send size={48} className="text-slate-400" />
+          <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-6">
+              <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center">
+                  <Send size={40} className="text-slate-400" />
               </div>
-              <h2 className="text-xl font-bold text-slate-900">No Active Campaign</h2>
-              <p className="text-slate-500 max-w-md">You haven't launched any campaign yet. Go to the Campaign Builder to upload your list and start sending.</p>
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">Campaign Cockpit Idle</h2>
+                <p className="text-slate-500 max-w-md mt-2">No active campaign detected. Go to the Campaign Builder to verify your list and launch your first campaign.</p>
+              </div>
           </div>
       );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       {/* Header Actions */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Campaign Monitor</h1>
-          <div className="flex items-center gap-2 mt-1">
-            <span className={`inline-block w-2 h-2 rounded-full ${activeCampaign.status === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
-            <span className="text-slate-500 text-sm font-medium">{activeCampaign.name}</span>
-          </div>
+      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 sticky top-0 z-10">
+        <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${activeCampaign.status === 'running' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                <Activity size={24} className={activeCampaign.status === 'running' ? 'animate-pulse' : ''} />
+            </div>
+            <div>
+                <h1 className="text-xl font-bold text-slate-900">{activeCampaign.name}</h1>
+                <div className="flex items-center gap-2">
+                    <span className={`inline-block w-2 h-2 rounded-full ${activeCampaign.status === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
+                    <span className="text-slate-500 text-xs font-medium uppercase tracking-wide">
+                        Status: {activeCampaign.status}
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="text-slate-500 text-xs">ID: {activeCampaign.id}</span>
+                </div>
+            </div>
         </div>
-        <div className="flex items-center gap-3">
+        
+        <div className="flex items-center gap-2">
           <button 
             onClick={toggleCampaign}
             disabled={instanceStatus !== 'connected' && activeCampaign.status !== 'running'}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
+            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all ${
               activeCampaign.status === 'running' 
-                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' 
-                : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' 
+                : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-200'
             } disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {activeCampaign.status === 'running' ? <Pause size={18} /> : <Play size={18} />}
-            {activeCampaign.status === 'running' ? 'Pause' : 'Resume'}
+            {activeCampaign.status === 'running' ? 'Pause Campaign' : 'Resume Campaign'}
           </button>
           
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium bg-rose-600 text-white hover:bg-rose-700 shadow-lg shadow-rose-200">
-            <OctagonX size={18} />
-            STOP
+          <button className="p-3 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 border border-rose-200 transition-colors" title="Emergency Stop">
+            <OctagonX size={20} />
           </button>
         </div>
       </div>
 
         {instanceStatus !== 'connected' && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3">
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3 animate-pulse">
                 <AlertTriangle size={20} />
-                <span className="font-medium">Instance Disconnected. The campaign worker cannot dispatch messages. Please reconnect in the Instance tab.</span>
+                <span className="font-bold">CRITICAL: Instance Disconnected.</span>
+                <span className="text-sm">The campaign worker is halted. Please reconnect in the Instance tab immediately.</span>
             </div>
         )}
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Messages Sent" value={activeCampaign.sentCount.toLocaleString()} icon={Send} color="blue" subValue={`${Math.round((activeCampaign.sentCount / activeCampaign.totalContacts) * 100)}% Complete`} />
-        <StatCard title="Failed / Invalid" value={activeCampaign.failedCount} icon={AlertTriangle} color="red" subValue="Wait list or Invalid" />
-        <StatCard title="Replies Received" value={activeCampaign.replyCount} icon={MessageSquare} color="green" subValue="Human intervention needed" />
-        <StatCard title="Coffee Breaks" value="0" icon={Coffee} color="yellow" subValue="Next in 50 msgs" />
+        <StatCard 
+            title="Messages Sent" 
+            value={(activeCampaign.sentCount || 0).toLocaleString()} 
+            icon={Send} 
+            color="blue" 
+            subValue={`${Math.round(((activeCampaign.sentCount || 0) / (activeCampaign.totalContacts || 1)) * 100)}% Complete`} 
+        />
+        <StatCard 
+            title="Failed / Invalid" 
+            value={activeCampaign.failedCount || 0} 
+            icon={AlertTriangle} 
+            color="red" 
+            subValue="Non-WhatsApp Numbers" 
+        />
+        <StatCard 
+            title="Replies Received" 
+            value={activeCampaign.replyCount || 0} 
+            icon={MessageSquare} 
+            color="green" 
+            subValue="Human intervention needed" 
+        />
+        <StatCard 
+            title="Est. Completion" 
+            value="2h 15m" 
+            icon={Clock} 
+            color="slate" 
+            subValue="@ 500 msgs/hr" 
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Main Chart */}
         <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-slate-900 mb-4">Throughput (Messages/Hr)</h3>
+          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Throughput (Messages/Hr)</h3>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b' }} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
                 <Tooltip 
-                  cursor={{ fill: '#f1f5f9' }}
+                  cursor={{ fill: '#f8fafc' }}
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
-                <Bar dataKey="sent" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="sent" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
+                <Bar dataKey="failed" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={50} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
         {/* Worker Live Status */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-0 overflow-hidden flex flex-col">
-          <div className="p-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-            <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-              <Terminal size={18} className="text-slate-500" />
-              Worker Node
+        <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg p-0 overflow-hidden flex flex-col text-white">
+          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+            <h3 className="font-mono text-sm text-emerald-400 flex items-center gap-2">
+              <Terminal size={16} />
+              WORKER_NODE_01
             </h3>
-            <div className={`px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${getStatusBadge()}`}>
-              {getStatusLabel()}
+            <div className="flex items-center gap-2">
+                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                 <span className="text-xs font-bold text-slate-400">ONLINE</span>
             </div>
           </div>
           
           {/* Current Action Visualizer */}
-          <div className="p-6 flex flex-col items-center justify-center border-b border-slate-100 bg-white min-h-[120px]">
+          <div className="p-6 flex flex-col items-center justify-center border-b border-slate-800 bg-slate-900 min-h-[140px]">
              {workerState.state === 'typing' && (
-                <div className="flex gap-1 mb-2">
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce"></span>
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-75"></span>
-                  <span className="w-2 h-2 bg-slate-400 rounded-full animate-bounce delay-150"></span>
+                <div className="flex flex-col items-center animate-in fade-in">
+                    <Smartphone size={32} className="text-amber-400 mb-2" />
+                    <div className="flex gap-1 mb-2">
+                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce"></span>
+                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce delay-75"></span>
+                        <span className="w-1.5 h-1.5 bg-amber-400 rounded-full animate-bounce delay-150"></span>
+                    </div>
+                    <p className="text-xs text-amber-400 font-mono">SIMULATING_TYPING</p>
                 </div>
              )}
              {workerState.state === 'waiting' && (
-                <div className="text-2xl font-mono font-bold text-slate-700">{workerState.nextActionIn}s</div>
+                <div className="flex flex-col items-center">
+                    <Coffee size={32} className="text-blue-400 mb-2" />
+                    <div className="text-3xl font-mono font-bold text-white mb-1">{workerState.nextActionIn}s</div>
+                    <p className="text-xs text-blue-400 font-mono">ANTI_BAN_DELAY</p>
+                </div>
+             )}
+             {workerState.state === 'sending' && (
+                 <div className="flex flex-col items-center animate-pulse">
+                     <Send size={32} className="text-emerald-400 mb-2" />
+                     <p className="text-xs text-emerald-400 font-mono">DISPATCHING...</p>
+                 </div>
              )}
              {workerState.state === 'idle' && (
-                 <div className="text-slate-300">No active job</div>
+                 <div className="text-slate-600 font-mono text-xs">IDLE_STATE</div>
              )}
-             <p className="text-sm text-slate-500 mt-2 text-center">
-               {workerState.state === 'idle' ? 'Worker is ready for jobs' : `Processing: ${workerState.currentContact}`}
-             </p>
+             
+             {workerState.currentContact && (
+                 <div className="mt-4 bg-slate-800 px-3 py-1 rounded text-xs font-mono text-slate-300">
+                     Target: {workerState.currentContact}
+                 </div>
+             )}
           </div>
 
           {/* Scrolling Logs */}
-          <div className="flex-1 overflow-y-auto max-h-[300px] p-4 bg-slate-900 font-mono text-xs">
-            {logs.length === 0 ? <span className="text-slate-600">// System ready. Logs will appear here.</span> : logs.map((log) => (
-              <div key={log.id} className="mb-2 last:mb-0">
-                <span className="text-slate-500 mr-2">[{log.timestamp}]</span>
+          <div className="flex-1 overflow-y-auto h-[200px] p-4 font-mono text-[10px] space-y-1 scrollbar-hide">
+            {logs.map((log) => (
+              <div key={log.id} className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
+                <span className="text-slate-500">[{log.timestamp}]</span>
                 <span className={
                   log.type === 'error' ? 'text-red-400' :
                   log.type === 'success' ? 'text-emerald-400' :
                   log.type === 'typing' ? 'text-amber-400' :
-                  log.type === 'warning' ? 'text-orange-400' :
                   'text-blue-300'
                 }>
                   {log.message}
@@ -280,6 +337,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Live Transmission Log Table */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <Activity size={18} className="text-blue-600" />
+                  Live Transmission Log
+              </h3>
+              <span className="text-xs font-medium text-slate-500 bg-white border border-slate-200 px-2 py-1 rounded">
+                  Showing last 20 events
+              </span>
+          </div>
+          <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-500 font-medium">
+                      <tr>
+                          <th className="px-6 py-3">Timestamp</th>
+                          <th className="px-6 py-3">Phone Number</th>
+                          <th className="px-6 py-3">Status</th>
+                          <th className="px-6 py-3">Details</th>
+                      </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                      {transmissionLogs.length === 0 ? (
+                          <tr>
+                              <td colSpan={4} className="px-6 py-8 text-center text-slate-400 italic">
+                                  Waiting for worker to start dispatching...
+                              </td>
+                          </tr>
+                      ) : (
+                          transmissionLogs.map((log) => (
+                              <tr key={log.id} className="hover:bg-slate-50 transition-colors">
+                                  <td className="px-6 py-3 text-slate-500 font-mono text-xs">{log.time}</td>
+                                  <td className="px-6 py-3 font-medium text-slate-700">{log.phone}</td>
+                                  <td className="px-6 py-3">
+                                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                          log.status === 'sent' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                                          log.status === 'failed' ? 'bg-rose-50 text-rose-700 border border-rose-100' :
+                                          'bg-slate-100 text-slate-600'
+                                      }`}>
+                                          {log.status === 'sent' && <CheckCircle2 size={12} />}
+                                          {log.status === 'failed' && <XCircle size={12} />}
+                                          {log.status === 'pending' && <Clock size={12} />}
+                                          {log.status.toUpperCase()}
+                                      </span>
+                                  </td>
+                                  <td className="px-6 py-3 text-slate-500">{log.info}</td>
+                              </tr>
+                          ))
+                      )}
+                  </tbody>
+              </table>
+          </div>
       </div>
     </div>
   );
