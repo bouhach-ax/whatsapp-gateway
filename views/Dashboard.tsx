@@ -60,9 +60,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
         let logMsg: WorkerLog | null = null;
         let updateCampaign = false;
         let newTransmission: TransmissionLog | null = null;
-        
-        // Mock Phone Number generator
-        const mockPhone = `+212 6${Math.floor(Math.random()*80)+10} ${Math.floor(Math.random()*99)} ${Math.floor(Math.random()*99)} ${Math.floor(Math.random()*99)}`;
+        let nextContactPhone = prev.currentContact;
 
         switch (prev.state) {
           case 'idle':
@@ -70,19 +68,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             nextState = 'fetching';
             nextDelay = 1;
             break;
+            
           case 'fetching':
-            nextState = 'checking_presence';
-            nextDelay = 1;
+            // LOGIC TO FETCH REAL NEXT CONTACT
+            const totalProcessed = (activeCampaign.sentCount || 0) + (activeCampaign.failedCount || 0);
+            
+            // If we have contacts and haven't finished the list
+            if (activeCampaign.contacts && totalProcessed < activeCampaign.contacts.length) {
+                const contactRow = activeCampaign.contacts[totalProcessed];
+                
+                // Find phone using mapping or fallback
+                let foundPhone = 'Unknown';
+                if (activeCampaign.mapping) {
+                    const phoneKey = Object.keys(activeCampaign.mapping).find(key => activeCampaign.mapping![key] === 'phone');
+                    if (phoneKey && contactRow[phoneKey]) foundPhone = contactRow[phoneKey];
+                } 
+                
+                // Fallback if mapping failed or not present
+                if (foundPhone === 'Unknown') {
+                    const keys = Object.keys(contactRow);
+                    const phoneKey = keys.find(k => k.toLowerCase().includes('phone') || k.toLowerCase().includes('tele')) || keys[0];
+                    foundPhone = contactRow[phoneKey];
+                }
+
+                nextContactPhone = foundPhone;
+                nextState = 'checking_presence';
+                nextDelay = 1;
+            } else if (activeCampaign.contacts && totalProcessed >= activeCampaign.contacts.length) {
+                // Campaign Finished
+                nextState = 'idle';
+                logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'info', message: 'Campaign Completed. All contacts processed.' };
+                // We should ideally update campaign status to 'completed' here, but let's just idle for now to avoid loop
+            } else {
+                 // Fallback Mock if no contacts (should not happen if flow is correct)
+                 nextContactPhone = `+212 6${Math.floor(Math.random()*80)+10} ... (Mock)`;
+                 nextState = 'checking_presence';
+                 nextDelay = 1;
+            }
             break;
+
           case 'checking_presence':
             nextState = 'typing';
-            nextDelay = 3;
+            nextDelay = 2; // Short presence check
             break;
+
           case 'typing':
             nextState = 'sending';
             nextDelay = 1;
-            logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'typing', message: `Typing for ${prev.currentContact || mockPhone}...` };
+            logMsg = { id: Date.now().toString(), timestamp: new Date().toLocaleTimeString(), type: 'typing', message: `Typing for ${prev.currentContact}...` };
             break;
+
           case 'sending':
             nextState = 'waiting';
             nextDelay = Math.floor(Math.random() * 5) + 5; // Faster for demo purposes
@@ -97,7 +132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             
             newTransmission = {
                 id: Date.now().toString(),
-                phone: prev.currentContact || mockPhone,
+                phone: prev.currentContact || 'Unknown',
                 status: isSuccess ? 'sent' : 'failed',
                 time: new Date().toLocaleTimeString(),
                 info: isSuccess ? 'Delivered' : 'Invalid Number'
@@ -105,21 +140,26 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             break;
         }
 
-        // Store current contact so it persists through typing->sending
-        const currentContact = nextState === 'fetching' ? mockPhone : prev.currentContact;
-
         if (updateCampaign && activeCampaign) {
             onCampaignUpdate({
                 ...activeCampaign,
                 sentCount: (activeCampaign.sentCount || 0) + (logMsg?.type === 'success' ? 1 : 0),
                 failedCount: (activeCampaign.failedCount || 0) + (logMsg?.type === 'error' ? 1 : 0)
             });
-            // Update chart data roughly
+            
+            // Update chart data roughly (FIXED: immutably update the object)
             setChartData(curr => {
                 const newData = [...curr];
-                const last = newData[newData.length -1];
-                if (logMsg?.type === 'success') last.sent += 1;
-                else last.failed += 1;
+                if (newData.length > 0) {
+                    const lastIndex = newData.length - 1;
+                    const lastItem = { ...newData[lastIndex] };
+                    if (logMsg?.type === 'success') {
+                        lastItem.sent += 1;
+                    } else {
+                        lastItem.failed += 1;
+                    }
+                    newData[lastIndex] = lastItem;
+                }
                 return newData;
             });
         }
@@ -131,7 +171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
           ...prev,
           state: nextState,
           nextActionIn: nextDelay,
-          currentContact: currentContact
+          currentContact: nextContactPhone
         };
       });
     }, 1000);
@@ -166,6 +206,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
           </div>
       );
   }
+
+  // Helper calculation for progress bar
+  const total = activeCampaign.totalContacts || 1;
+  const processed = (activeCampaign.sentCount || 0) + (activeCampaign.failedCount || 0);
+  const progressPercent = Math.min(100, Math.round((processed / total) * 100));
 
   return (
     <div className="space-y-6 pb-20">
@@ -223,7 +268,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             value={(activeCampaign.sentCount || 0).toLocaleString()} 
             icon={Send} 
             color="blue" 
-            subValue={`${Math.round(((activeCampaign.sentCount || 0) / (activeCampaign.totalContacts || 1)) * 100)}% Complete`} 
+            subValue={`${progressPercent}% Complete`} 
         />
         <StatCard 
             title="Failed / Invalid" 
@@ -240,11 +285,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             subValue="Human intervention needed" 
         />
         <StatCard 
-            title="Est. Completion" 
-            value="2h 15m" 
+            title="Target List" 
+            value={activeCampaign.totalContacts || 0} 
             icon={Clock} 
             color="slate" 
-            subValue="@ 500 msgs/hr" 
+            subValue={`${activeCampaign.totalContacts - processed} remaining`} 
         />
       </div>
 
@@ -278,8 +323,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
               WORKER_NODE_01
             </h3>
             <div className="flex items-center gap-2">
-                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-                 <span className="text-xs font-bold text-slate-400">ONLINE</span>
+                 <span className={`w-2 h-2 rounded-full ${workerState.state === 'idle' ? 'bg-slate-500' : 'bg-emerald-500 animate-pulse'}`}></span>
+                 <span className="text-xs font-bold text-slate-400">{workerState.state === 'idle' ? 'IDLE' : 'BUSY'}</span>
             </div>
           </div>
           
@@ -310,7 +355,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                  </div>
              )}
              {workerState.state === 'idle' && (
-                 <div className="text-slate-600 font-mono text-xs">IDLE_STATE</div>
+                 <div className="text-slate-600 font-mono text-xs">WAITING FOR TASKS...</div>
              )}
              
              {workerState.currentContact && (

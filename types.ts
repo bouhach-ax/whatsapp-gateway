@@ -11,6 +11,8 @@ export interface Campaign {
   id: string;
   name: string;
   status: 'draft' | 'running' | 'paused' | 'completed' | 'stopped';
+  contacts?: any[]; // Array of CSV rows
+  mapping?: { [key: string]: string }; // Map CSV headers to variables
   totalContacts: number;
   sentCount: number;
   failedCount: number;

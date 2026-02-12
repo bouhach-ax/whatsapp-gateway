@@ -131,14 +131,16 @@ fastify.post('/instance/logout', async (request, reply) => {
 });
 
 fastify.post('/campaigns', async (request, reply) => {
-    const { name, contacts, template } = request.body;
+    const { name, contacts, template, mapping } = request.body;
     console.log(`Received campaign "${name}" with ${contacts?.length || 0} contacts`);
     
-    // Return full Campaign object to match Frontend Interface
+    // Return full Campaign object to match Frontend Interface, including contacts
     return { 
         id: 'cmp_' + Date.now(), 
         name: name || 'Untitled Campaign',
         status: 'running', 
+        contacts: contacts || [],
+        mapping: mapping || {},
         totalContacts: contacts ? contacts.length : 0,
         sentCount: 0,
         failedCount: 0,
