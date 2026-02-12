@@ -1,17 +1,12 @@
 import { Campaign, InstanceState, WorkerStatus } from '../types';
 
 // ---------------------------------------------------------------------------
-// CONFIGURATION CRITIQUE
+// CONFIGURATION
 // ---------------------------------------------------------------------------
-// 1. Mettre à FALSE pour utiliser le vrai serveur Render
 const MOCK_MODE = false; 
-
-// 2. Mettre ici l'URL que Render te donnera (ex: https://mon-api.onrender.com)
-const API_URL = 'https://whatsapp-gateway-vigf.onrender.com';
+const API_URL = 'http://localhost:3000'; // Or your Render URL
 // ---------------------------------------------------------------------------
 
-
-// Mock Data Store (Simulates Backend Database)
 let mockInstance: InstanceState = {
   status: 'disconnected',
   batteryLevel: 0,
@@ -33,7 +28,6 @@ export const api = {
         return await res.json();
     } catch (error) {
         console.error("API Error:", error);
-        // Fallback to disconnected if server is down
         return { status: 'disconnected', batteryLevel: 0, phoneName: '', phoneNumber: '', platform: '' };
     }
   },
@@ -58,18 +52,6 @@ export const api = {
   // --- CAMPAIGNS ---
 
   async createCampaign(campaignData: any): Promise<Campaign> {
-    if (MOCK_MODE) {
-        return new Promise(resolve => setTimeout(() => resolve({
-            id: 'cmp_' + Date.now(),
-            name: campaignData.name,
-            status: 'running',
-            totalContacts: campaignData.contacts.length,
-            sentCount: 0,
-            failedCount: 0,
-            replyCount: 0,
-            createdAt: new Date().toISOString()
-        }), 800));
-    }
     const res = await fetch(`${API_URL}/campaigns`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -79,40 +61,19 @@ export const api = {
   },
 
   async getCampaignStats(campaignId: string): Promise<Campaign> {
-     if (MOCK_MODE) {
-         return {
-             id: campaignId,
-             name: 'Mock Campaign',
-             status: 'running',
-             totalContacts: 100,
-             sentCount: Math.floor(Math.random() * 50),
-             failedCount: 0,
-             replyCount: 0,
-             createdAt: new Date().toISOString()
-         } as Campaign;
-     }
+     // Not used currently, we use getCurrentCampaignStatus
      const res = await fetch(`${API_URL}/campaigns/${campaignId}`);
      return res.json();
   },
 
-  // --- WORKER ---
-  
-  async getWorkerLogs(): Promise<any[]> {
-      if (MOCK_MODE) return [];
-      // In real backend, you'd expose a GET /logs endpoint
-      return []; 
+  // NEW: Poll real status
+  async getCurrentCampaignStatus(): Promise<any> {
+      const res = await fetch(`${API_URL}/campaigns/current`);
+      return res.json();
   },
 
-  // Helper for demo simulation (To be removed in production)
-  _simulateConnectionSuccess() {
-      if (MOCK_MODE) {
-          mockInstance = {
-              status: 'connected',
-              batteryLevel: 98,
-              phoneName: "Real WhatsApp Device",
-              phoneNumber: "+212 661 99 99 99",
-              platform: "iOS"
-          };
-      }
+  async toggleCampaign(): Promise<any> {
+      const res = await fetch(`${API_URL}/campaigns/toggle`, { method: 'POST' });
+      return res.json();
   }
 };
