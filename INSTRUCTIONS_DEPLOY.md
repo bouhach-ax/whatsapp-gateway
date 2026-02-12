@@ -1,6 +1,16 @@
+
 # Comment rendre ce projet VIVANT
 
 Tu as maintenant le code Frontend (React) et le code Backend (Node.js). Voici quoi faire :
+
+## Etape 0 : La Base de Données (CRITIQUE)
+
+1. Connecte-toi à [Supabase](https://supabase.com).
+2. Ouvre ton projet `jccqciuptsyniaxcyfra`.
+3. Va dans **SQL Editor**.
+4. Copie le contenu du fichier `SUPABASE_SETUP.sql` de ce projet.
+5. Colle-le dans Supabase et clique sur **RUN**.
+6. Si tu vois "Success", c'est bon. Sans ça, rien ne marchera.
 
 ## Etape 1 : Le Backend (Sur Render.com)
 
@@ -11,18 +21,15 @@ Tu as maintenant le code Frontend (React) et le code Backend (Node.js). Voici qu
 5. **Start Command:** `node server.js`
 6. Clique sur "Deploy". Render va te donner une URL (ex: `https://smartdoc-backend.onrender.com`).
 
-**Note :** Le dossier `auth_info_baileys` (session) sera perdu à chaque redémarrage sur la version gratuite de Render. Pour la prod, il faudra ajouter une base de données, mais pour tester maintenant, c'est suffisant.
-
 ## Etape 2 : Lier le Frontend
 
 1. Ouvre le fichier `services/api.ts` dans ton Frontend.
-2. Change `MOCK_MODE = false`.
-3. Change `http://localhost:3000` par l'URL que Render t'a donnée (ex: `https://smartdoc-backend.onrender.com`).
+2. Vérifie que la variable `API_URL` pointe bien vers ton URL Render (c'est déjà configuré, mais vérifie).
 
 ## Etape 3 : C'est parti
 
 1. Ouvre ton app React.
 2. Va dans l'onglet **Instance**.
 3. Clique sur "Connect".
-4. Le QR Code qui s'affiche vient maintenant VRAIMENT de ton serveur Render.
+4. Le QR Code qui s'affiche vient maintenant VRAIMENT de ton serveur Render via la base de données Supabase.
 5. Scanne avec ton téléphone.

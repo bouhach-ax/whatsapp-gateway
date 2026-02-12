@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Send, Settings, Smartphone, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Send, Settings, Smartphone, MessageCircle, History, Users } from 'lucide-react';
 import { Tab } from '../types';
 
 interface SidebarProps {
@@ -10,7 +10,9 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
   const menuItems = [
     { id: Tab.DASHBOARD, label: 'Monitor', icon: LayoutDashboard },
-    { id: Tab.CAMPAIGN, label: 'Campaigns', icon: Send },
+    { id: Tab.CAMPAIGN, label: 'New Campaign', icon: Send },
+    { id: Tab.LISTS, label: 'Mes Listes', icon: Users },
+    { id: Tab.HISTORY, label: 'History', icon: History },
     { id: Tab.INSTANCE, label: 'Instance', icon: Smartphone },
     { id: Tab.SETTINGS, label: 'Settings', icon: Settings },
   ];
@@ -23,7 +25,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
         </div>
         <div>
           <h1 className="font-bold text-lg tracking-tight">Smartdoc</h1>
-          <p className="text-xs text-slate-400">Gateway v2.1</p>
+          <p className="text-xs text-slate-400">Gateway v2.2 (DB)</p>
         </div>
       </div>
 
@@ -52,11 +54,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
           <p className="text-xs text-slate-400 mb-1">System Status</p>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span className="text-xs font-semibold text-emerald-400">Redis: Connected</span>
-          </div>
-          <div className="flex items-center gap-2 mt-1">
-             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-             <span className="text-xs font-semibold text-emerald-400">BullMQ: Active</span>
+            <span className="text-xs font-semibold text-emerald-400">Supabase: Linked</span>
           </div>
         </div>
       </div>

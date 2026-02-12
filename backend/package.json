@@ -1,7 +1,7 @@
 {
   "name": "smartdoc-gateway-backend",
-  "version": "1.0.0",
-  "description": "WhatsApp Baileys Gateway for Render",
+  "version": "2.0.0",
+  "description": "WhatsApp Baileys Gateway with Supabase",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -12,7 +12,8 @@
     "fastify": "^4.26.1",
     "@fastify/cors": "^9.0.1",
     "qrcode": "^1.5.3",
-    "pino": "^8.19.0"
+    "pino": "^8.19.0",
+    "@supabase/supabase-js": "^2.39.0"
   },
   "engines": {
     "node": ">=18.0.0"

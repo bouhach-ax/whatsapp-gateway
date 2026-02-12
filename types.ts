@@ -1,6 +1,7 @@
+
 export interface InstanceState {
   status: 'connected' | 'disconnected' | 'pairing' | 'banned';
-  qrCode?: string; // Base64 string
+  qrCode?: string; 
   batteryLevel: number;
   phoneName: string;
   phoneNumber: string;
@@ -11,13 +12,14 @@ export interface Campaign {
   id: string;
   name: string;
   status: 'draft' | 'running' | 'paused' | 'completed' | 'stopped';
-  contacts?: any[]; // Array of CSV rows
-  mapping?: { [key: string]: string }; // Map CSV headers to variables
+  contacts?: any[]; 
+  mapping?: { [key: string]: string }; 
   totalContacts: number;
   sentCount: number;
   failedCount: number;
   replyCount: number;
-  createdAt: string;
+  created_at: string;   // Changed from createdAt to match Supabase
+  completed_at?: string; // Changed from completedAt to match Supabase
 }
 
 export interface WorkerLog {
@@ -27,15 +29,13 @@ export interface WorkerLog {
   message: string;
 }
 
-export interface WorkerStatus {
-  state: 'idle' | 'fetching' | 'checking_presence' | 'typing' | 'waiting' | 'sending' | 'cooldown' | 'stopped';
-  currentContact?: string;
-  nextActionIn?: number; // seconds
-}
+export type WorkerStatus = 'idle' | 'running' | 'paused';
 
 export enum Tab {
   DASHBOARD = 'DASHBOARD',
   CAMPAIGN = 'CAMPAIGN',
+  LISTS = 'LISTS',
   INSTANCE = 'INSTANCE',
+  HISTORY = 'HISTORY',
   SETTINGS = 'SETTINGS',
 }

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileSpreadsheet, ArrowRight, Keyboard, Users, Save, PlayCircle, Settings, AlertCircle, CheckCircle, Loader2, Plus, Trash2 } from 'lucide-react';
+import { FileSpreadsheet, ArrowRight, Keyboard, Save, PlayCircle, AlertCircle, CheckCircle2, Loader2, Plus, Trash2, Edit2, X, ChevronLeft, ChevronRight, Users, Download, Cloud } from 'lucide-react';
 import Papa from 'papaparse';
 import { Campaign } from '../types';
 import { api } from '../services/api';
@@ -12,24 +12,90 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
   const [step, setStep] = useState(1);
   
   // Step 1: Input Method
-  const [inputMethod, setInputMethod] = useState<'file' | 'manual'>('file');
+  const [inputMethod, setInputMethod] = useState<'file' | 'manual' | 'saved'>('file');
   const [file, setFile] = useState<File | null>(null);
-  const [manualContacts, setManualContacts] = useState<{phone: string, name: string, info: string}[]>([]);
-  const [manualInput, setManualInput] = useState({ phone: '', name: '', info: '' });
+  const [savedLists, setSavedLists] = useState<any[]>([]);
+  const [isLoadingLists, setIsLoadingLists] = useState(false);
+  
+  // Manual Entry State
+  const [manualContacts, setManualContacts] = useState<{nom: string, numero: string, ville: string, url: string, specialite: string}[]>([]);
+  const [manualInput, setManualInput] = useState({ nom: '', numero: '', ville: '', url: '', specialite: '' });
 
   // Data State
   const [csvData, setCsvData] = useState<any[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [mapping, setMapping] = useState<{ [key: string]: string }>({});
   
+  // Review Step State
+  const [currentPage, setCurrentPage] = useState(1);
+  const rowsPerPage = 10;
+  const [editingRowIndex, setEditingRowIndex] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState<any>({});
+  
+  // Save List State
+  const [saveListMode, setSaveListMode] = useState(false);
+  const [newListName, setNewListName] = useState("");
+  const [isSavingList, setIsSavingList] = useState(false);
+
   // Launch State
   const [isLaunching, setIsLaunching] = useState(false);
-  const [campaignName, setCampaignName] = useState("Campaign " + new Date().toLocaleDateString() + " " + new Date().toLocaleTimeString().slice(0,5));
-  const [template, setTemplate] = useState("{Bonjour|Salam} {{Name}}, ...");
+  const [campaignName, setCampaignName] = useState("Campagne " + new Date().toLocaleDateString());
+  const [template, setTemplate] = useState("{Bonjour|Salam} Dr {{Nom}}, expert en {{Spécialité}} à {{Ville}}.\n\nVoici le lien de votre dossier : {{URL}}");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- HANDLERS ---
+
+  useEffect(() => {
+      if (inputMethod === 'saved') {
+          loadSavedLists();
+      }
+  }, [inputMethod]);
+
+  const loadSavedLists = async () => {
+      setIsLoadingLists(true);
+      try {
+          const lists = await api.getContactLists();
+          setSavedLists(lists);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setIsLoadingLists(false);
+      }
+  };
+
+  const handleLoadList = async (listId: string) => {
+      setIsLoadingLists(true);
+      try {
+          const items = await api.getListItems(listId);
+          // Convert DB items back to "CSV-like" structure
+          const formattedData = items.map((item: any) => ({
+             phone: item.phone, // Internal field
+             ...item.data       // Spread the JSONB data (Nom, Ville, etc.)
+          }));
+
+          setCsvData(formattedData);
+          
+          // Reconstruct headers based on the first item + phone
+          if (formattedData.length > 0) {
+              const keys = Object.keys(formattedData[0]);
+              setHeaders(keys);
+              
+              // Auto map
+              const newMapping: any = {};
+              keys.forEach(k => {
+                  if (k === 'phone') newMapping[k] = 'phone';
+                  else newMapping[k] = k; // Assume exact match for saved lists
+              });
+              setMapping(newMapping);
+              setStep(3); // Skip mapping for saved lists, go to review
+          }
+      } catch (e) {
+          alert("Erreur lors du chargement de la liste");
+      } finally {
+          setIsLoadingLists(false);
+      }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFile = e.target.files?.[0];
@@ -49,20 +115,20 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
             setHeaders(results.meta.fields || []);
             setStep(2);
           } else {
-            alert("The CSV file appears to be empty or invalid.");
+            alert("Le fichier CSV semble vide ou invalide.");
           }
         },
         error: (err) => {
           console.error("CSV Error:", err);
-          alert("Error parsing CSV file.");
+          alert("Erreur lors de la lecture du CSV.");
         }
       });
   };
 
   const addManualContact = () => {
-      if (!manualInput.phone) return alert("Phone number is required");
+      if (!manualInput.numero) return alert("Le numéro est requis");
       setManualContacts([...manualContacts, { ...manualInput }]);
-      setManualInput({ phone: '', name: '', info: '' });
+      setManualInput({ nom: '', numero: '', ville: '', url: '', specialite: '' });
   };
 
   const removeManualContact = (index: number) => {
@@ -70,15 +136,15 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
   };
 
   const proceedFromManual = () => {
-      if (manualContacts.length === 0) return alert("Add at least one contact");
-      
-      // Convert manual object to 'CSV-like' structure
+      if (manualContacts.length === 0) return alert("Ajoutez au moins un contact");
       setCsvData(manualContacts);
-      setHeaders(['phone', 'name', 'info']);
+      setHeaders(['nom', 'numero', 'ville', 'url', 'specialite']);
       setMapping({
-          'phone': 'phone',
-          'name': 'Nom',
-          'info': 'Custom1'
+          'nom': 'Nom',
+          'numero': 'phone',
+          'ville': 'Ville',
+          'url': 'URL',
+          'specialite': 'Spécialité'
       });
       setStep(2);
   };
@@ -90,13 +156,54 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
     }));
   };
 
+  const handleSaveList = async () => {
+      if (!newListName) return alert("Nom de liste requis");
+      setIsSavingList(true);
+      try {
+          await api.saveContactList(newListName, csvData, mapping);
+          alert("Liste sauvegardée avec succès !");
+          setSaveListMode(false);
+      } catch (e) {
+          alert("Erreur sauvegarde: " + e);
+      } finally {
+          setIsSavingList(false);
+      }
+  };
+
+  // --- REVIEW STEP HELPERS ---
+
+  const getMappedValue = (row: any, systemVar: string) => {
+      // Find which CSV header maps to this system variable
+      const header = Object.keys(mapping).find(key => mapping[key] === systemVar);
+      return header ? row[header] : '';
+  };
+
+  const deleteRow = (realIndex: number) => {
+      if (confirm("Supprimer ce contact ?")) {
+          const newData = csvData.filter((_, i) => i !== realIndex);
+          setCsvData(newData);
+      }
+  };
+
+  const startEditing = (realIndex: number) => {
+      setEditingRowIndex(realIndex);
+      setEditValues({ ...csvData[realIndex] });
+  };
+
+  const saveEdit = (realIndex: number) => {
+      const newData = [...csvData];
+      newData[realIndex] = editValues;
+      setCsvData(newData);
+      setEditingRowIndex(null);
+  };
+
+  // --- TEMPLATE HELPERS ---
+
   const getPreview = () => {
     if (csvData.length === 0) return template;
-    
     let text = template;
     const firstRow = csvData[0];
 
-    // Replace mapped variables
     Object.entries(mapping).forEach(([header, variable]) => {
       if (variable !== 'ignore' && variable !== 'phone') {
          const regex = new RegExp(`{{${variable}}}`, 'g');
@@ -104,18 +211,15 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
       }
     });
 
-    // Handle Spintax
     text = text.replace(/\{([^{}]+)\}/g, (match, group) => {
       const options = group.split('|');
       return options[Math.floor(Math.random() * options.length)];
     });
-    
     return text;
   };
 
   const handleLaunch = async () => {
-    if (!campaignName) return alert("Please name your campaign");
-    
+    if (!campaignName) return alert("Veuillez nommer votre campagne");
     setIsLaunching(true);
     try {
         const campaignData = {
@@ -124,151 +228,177 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
             mapping: mapping,
             template: template
         };
-        
         const newCampaign = await api.createCampaign(campaignData);
         onCreateCampaign(newCampaign);
     } catch (e) {
-        alert("Error launching campaign: " + e);
+        alert("Erreur lors du lancement : " + e);
         setIsLaunching(false);
     }
   };
 
-  // Auto-guess mapping for phone in File mode
+  // Auto-guess mapping logic
   useEffect(() => {
     if (inputMethod === 'file' && headers.length > 0) {
-      const phoneHeader = headers.find(h => h.toLowerCase().includes('tele') || h.toLowerCase().includes('phone') || h.toLowerCase().includes('mobile'));
-      if (phoneHeader) {
-        setMapping(prev => ({ ...prev, [phoneHeader]: 'phone' }));
-      }
+      const newMapping: {[key:string]: string} = {};
+      headers.forEach(h => {
+          const lower = h.trim().toLowerCase();
+          if (lower.includes('nom') || lower.includes('name')) newMapping[h] = 'Nom';
+          else if (lower.includes('num') || lower.includes('phone') || lower.includes('mobile')) newMapping[h] = 'phone';
+          else if (lower.includes('ville') || lower.includes('city')) newMapping[h] = 'Ville';
+          else if (lower.includes('url') || lower.includes('link')) newMapping[h] = 'URL';
+          else if (lower.includes('spec')) newMapping[h] = 'Spécialité';
+      });
+      setMapping(prev => ({ ...prev, ...newMapping }));
     }
   }, [headers, inputMethod]);
 
+  // Pagination Logic
+  const totalPages = Math.ceil(csvData.length / rowsPerPage);
+  const paginatedData = csvData.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-20">
+    <div className="max-w-6xl mx-auto space-y-6 pb-20">
+      {/* Progress Bar */}
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-slate-900">Campaign Wizard</h2>
+        <h2 className="text-2xl font-bold text-slate-900">Assistant Campagne</h2>
         <div className="flex items-center gap-2 text-sm text-slate-500">
            <span className={step >= 1 ? "text-blue-600 font-bold" : ""}>1. Source</span>
            <span className="text-slate-300">/</span>
            <span className={step >= 2 ? "text-blue-600 font-bold" : ""}>2. Mapping</span>
            <span className="text-slate-300">/</span>
-           <span className={step >= 3 ? "text-blue-600 font-bold" : ""}>3. Template</span>
+           <span className={step >= 3 ? "text-blue-600 font-bold" : ""}>3. Vérification</span>
+           <span className="text-slate-300">/</span>
+           <span className={step >= 4 ? "text-blue-600 font-bold" : ""}>4. Template</span>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px]">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden min-h-[500px] flex flex-col">
         
-        {/* STEP 1: UPLOAD OR MANUAL */}
+        {/* STEP 1: UPLOAD OR LISTS */}
         {step === 1 && (
-          <div className="p-8 h-full flex flex-col">
-             <div className="flex gap-4 justify-center mb-8">
-                 <button 
-                    onClick={() => setInputMethod('file')}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-lg border transition-all ${inputMethod === 'file' ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-                 >
-                    <FileSpreadsheet size={20} />
-                    Upload CSV
+          <div className="p-8 h-full flex flex-col items-center flex-1">
+             <div className="flex gap-4 justify-center mb-8 w-full max-w-3xl">
+                 <button onClick={() => setInputMethod('file')} className={`flex-1 flex items-center justify-center gap-2 px-6 py-4 rounded-xl border-2 transition-all ${inputMethod === 'file' ? 'bg-blue-50 border-blue-500 text-blue-700 font-bold shadow-sm' : 'bg-white border-slate-100 text-slate-500 hover:bg-slate-50'}`}>
+                    <FileSpreadsheet size={24} /> 
+                    <div className="text-left">
+                        <div className="text-sm">Nouvel Import</div>
+                        <div className="text-xs font-normal opacity-70">CSV Excel</div>
+                    </div>
                  </button>
-                 <button 
-                    onClick={() => setInputMethod('manual')}
-                    className={`flex items-center gap-2 px-6 py-3 rounded-lg border transition-all ${inputMethod === 'manual' ? 'bg-blue-50 border-blue-500 text-blue-700 font-semibold' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}
-                 >
-                    <Keyboard size={20} />
-                    Manual Entry
+                 <button onClick={() => setInputMethod('saved')} className={`flex-1 flex items-center justify-center gap-2 px-6 py-4 rounded-xl border-2 transition-all ${inputMethod === 'saved' ? 'bg-purple-50 border-purple-500 text-purple-700 font-bold shadow-sm' : 'bg-white border-slate-100 text-slate-500 hover:bg-slate-50'}`}>
+                    <Cloud size={24} />
+                    <div className="text-left">
+                        <div className="text-sm">Listes Enregistrées</div>
+                        <div className="text-xs font-normal opacity-70">Réutiliser une audience</div>
+                    </div>
+                 </button>
+                 <button onClick={() => setInputMethod('manual')} className={`flex-1 flex items-center justify-center gap-2 px-6 py-4 rounded-xl border-2 transition-all ${inputMethod === 'manual' ? 'bg-emerald-50 border-emerald-500 text-emerald-700 font-bold shadow-sm' : 'bg-white border-slate-100 text-slate-500 hover:bg-slate-50'}`}>
+                    <Keyboard size={24} />
+                    <div className="text-left">
+                        <div className="text-sm">Saisie Manuelle</div>
+                        <div className="text-xs font-normal opacity-70">Ajout rapide</div>
+                    </div>
                  </button>
              </div>
 
-             {inputMethod === 'file' ? (
-                 <div className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors p-12">
+             {inputMethod === 'file' && (
+                 <div className="w-full max-w-xl flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50 hover:bg-slate-50 p-12 transition-colors">
                     <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mb-4">
                         <FileSpreadsheet size={32} className="text-blue-600" />
                     </div>
-                    <h3 className="text-lg font-medium text-slate-900 mb-2">Drag & Drop your CSV file here</h3>
-                    <p className="text-slate-500 mb-6 text-sm max-w-sm text-center">Ensure your file has a header row. Columns like "Phone", "Name" are recommended.</p>
-                    <button 
-                        onClick={() => fileInputRef.current?.click()}
-                        className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-200"
-                    >
-                        Browse Files
+                    <h3 className="text-lg font-bold text-slate-900 mb-2">Glissez-déposez votre fichier CSV ici</h3>
+                    <p className="text-slate-500 mb-6 text-sm text-center">Format recommandé : <br/><strong>Nom, Numero, Ville, URL, Specialite</strong></p>
+                    <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all active:scale-95">
+                        Parcourir les fichiers
                     </button>
-                    <input 
-                      type="file" 
-                      accept=".csv"
-                      className="hidden" 
-                      ref={fileInputRef}
-                      onChange={handleFileUpload} 
-                    />
+                    <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
                  </div>
-             ) : (
-                 <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
-                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4">
-                         <div className="grid grid-cols-12 gap-3 mb-2">
-                             <div className="col-span-4">
-                                 <label className="text-xs font-semibold text-slate-500 uppercase">Phone (Required)</label>
-                                 <input 
-                                    type="text" 
-                                    placeholder="212661..." 
-                                    className="w-full mt-1 p-2 border border-slate-300 rounded text-sm"
-                                    value={manualInput.phone}
-                                    onChange={e => setManualInput({...manualInput, phone: e.target.value})}
-                                 />
+             )}
+
+             {inputMethod === 'saved' && (
+                 <div className="w-full max-w-3xl">
+                     <h3 className="text-lg font-bold text-slate-800 mb-4">Vos audiences sauvegardées</h3>
+                     {isLoadingLists ? (
+                         <div className="text-center p-12"><Loader2 className="animate-spin mx-auto text-blue-500 mb-2"/> Chargement...</div>
+                     ) : savedLists.length === 0 ? (
+                         <div className="text-center p-12 border-2 border-dashed rounded-xl bg-slate-50 text-slate-400">Aucune liste trouvée. Importez un CSV et sauvegardez-le.</div>
+                     ) : (
+                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                             {savedLists.map(list => (
+                                 <div key={list.id} onClick={() => handleLoadList(list.id)} className="group cursor-pointer bg-white border border-slate-200 p-4 rounded-xl hover:border-purple-500 hover:shadow-md transition-all">
+                                     <div className="flex justify-between items-start">
+                                         <div>
+                                             <h4 className="font-bold text-slate-800 group-hover:text-purple-700">{list.name}</h4>
+                                             <p className="text-xs text-slate-500 mt-1">{new Date(list.created_at).toLocaleDateString()}</p>
+                                         </div>
+                                         <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold flex items-center gap-1">
+                                             <Users size={12}/> {list.total_contacts}
+                                         </span>
+                                     </div>
+                                 </div>
+                             ))}
+                         </div>
+                     )}
+                 </div>
+             )}
+
+             {inputMethod === 'manual' && (
+                 <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full">
+                     <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 mb-6">
+                         <div className="grid grid-cols-12 gap-4 items-end">
+                             <div className="col-span-2">
+                                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Nom *</label>
+                                 <input type="text" placeholder="Dr Alami" className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none" value={manualInput.nom} onChange={e => setManualInput({...manualInput, nom: e.target.value})} />
                              </div>
-                             <div className="col-span-4">
-                                 <label className="text-xs font-semibold text-slate-500 uppercase">Name</label>
-                                 <input 
-                                    type="text" 
-                                    placeholder="Dr Alami" 
-                                    className="w-full mt-1 p-2 border border-slate-300 rounded text-sm"
-                                    value={manualInput.name}
-                                    onChange={e => setManualInput({...manualInput, name: e.target.value})}
-                                 />
+                             <div className="col-span-2">
+                                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Numéro *</label>
+                                 <input type="text" placeholder="2126..." className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none" value={manualInput.numero} onChange={e => setManualInput({...manualInput, numero: e.target.value})} />
+                             </div>
+                             <div className="col-span-2">
+                                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Ville</label>
+                                 <input type="text" placeholder="Rabat" className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none" value={manualInput.ville} onChange={e => setManualInput({...manualInput, ville: e.target.value})} />
                              </div>
                              <div className="col-span-3">
-                                 <label className="text-xs font-semibold text-slate-500 uppercase">Info/Spec</label>
-                                 <input 
-                                    type="text" 
-                                    placeholder="Cardio" 
-                                    className="w-full mt-1 p-2 border border-slate-300 rounded text-sm"
-                                    value={manualInput.info}
-                                    onChange={e => setManualInput({...manualInput, info: e.target.value})}
-                                 />
+                                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">URL Dossier</label>
+                                 <input type="text" placeholder="https://..." className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none" value={manualInput.url} onChange={e => setManualInput({...manualInput, url: e.target.value})} />
                              </div>
-                             <div className="col-span-1 flex items-end">
-                                 <button 
-                                    onClick={addManualContact}
-                                    className="w-full p-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 flex justify-center"
-                                 >
+                             <div className="col-span-2">
+                                 <label className="text-xs font-bold text-slate-700 uppercase mb-1 block">Spécialité</label>
+                                 <input type="text" placeholder="Cardio" className="w-full p-2.5 bg-white border border-slate-300 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-blue-500 outline-none" value={manualInput.specialite} onChange={e => setManualInput({...manualInput, specialite: e.target.value})} />
+                             </div>
+                             <div className="col-span-1">
+                                 <button onClick={addManualContact} className="w-full p-2.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex justify-center shadow-md">
                                      <Plus size={20} />
                                  </button>
                              </div>
                          </div>
                      </div>
-
-                     <div className="flex-1 border rounded-lg overflow-hidden bg-white mb-4 overflow-y-auto max-h-[300px]">
+                     
+                     <div className="flex-1 border border-slate-200 rounded-xl overflow-hidden bg-white mb-4 overflow-y-auto max-h-[300px]">
                          <table className="w-full text-sm text-left">
-                             <thead className="bg-slate-100 text-slate-600">
+                             <thead className="bg-slate-100 text-slate-700 font-semibold">
                                  <tr>
-                                     <th className="p-3">Phone</th>
-                                     <th className="p-3">Name</th>
-                                     <th className="p-3">Info</th>
+                                     <th className="p-3">Nom</th>
+                                     <th className="p-3">Numéro</th>
+                                     <th className="p-3">Ville</th>
+                                     <th className="p-3">URL</th>
+                                     <th className="p-3">Spécialité</th>
                                      <th className="p-3 w-10"></th>
                                  </tr>
                              </thead>
-                             <tbody>
+                             <tbody className="divide-y divide-slate-100">
                                  {manualContacts.length === 0 ? (
-                                     <tr>
-                                         <td colSpan={4} className="p-8 text-center text-slate-400">No contacts added yet.</td>
-                                     </tr>
+                                     <tr><td colSpan={6} className="p-8 text-center text-slate-400">Aucun contact ajouté.</td></tr>
                                  ) : (
                                      manualContacts.map((c, i) => (
-                                         <tr key={i} className="border-t border-slate-100">
-                                             <td className="p-3 font-mono text-slate-700">{c.phone}</td>
-                                             <td className="p-3">{c.name}</td>
-                                             <td className="p-3">{c.info}</td>
-                                             <td className="p-3">
-                                                 <button onClick={() => removeManualContact(i)} className="text-red-400 hover:text-red-600">
-                                                     <Trash2 size={16} />
-                                                 </button>
+                                         <tr key={i} className="hover:bg-slate-50">
+                                             <td className="p-3 text-slate-900 font-medium">{c.nom}</td>
+                                             <td className="p-3 font-mono text-slate-600">{c.numero}</td>
+                                             <td className="p-3 text-slate-700">{c.ville}</td>
+                                             <td className="p-3 text-blue-600 truncate max-w-[150px]">{c.url}</td>
+                                             <td className="p-3 text-slate-700">{c.specialite}</td>
+                                             <td className="p-3 text-center">
+                                                 <button onClick={() => removeManualContact(i)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button>
                                              </td>
                                          </tr>
                                      ))
@@ -278,12 +408,8 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                      </div>
 
                      <div className="flex justify-end">
-                         <button 
-                            onClick={proceedFromManual}
-                            disabled={manualContacts.length === 0}
-                            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                         >
-                             Next Step <ArrowRight size={16} />
+                         <button onClick={proceedFromManual} disabled={manualContacts.length === 0} className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700 font-bold shadow-lg shadow-blue-200 disabled:opacity-50 flex items-center gap-2">
+                             Suivant <ArrowRight size={18} />
                          </button>
                      </div>
                  </div>
@@ -294,36 +420,34 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
         {/* STEP 2: MAPPING */}
         {step === 2 && (
           <div className="p-8">
-            <h3 className="text-lg font-semibold mb-4">Variable Mapping</h3>
-            <p className="text-slate-500 text-sm mb-6">Match your CSV columns to the system variables. You <b>must</b> select one column as 'Phone Number'.</p>
-            
-            <div className="border rounded-lg overflow-hidden">
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Mapping des Variables</h3>
+            <p className="text-slate-500 text-sm mb-6">Associez les colonnes. 'Numéro WhatsApp' est <strong>obligatoire</strong>.</p>
+            <div className="border border-slate-200 rounded-lg overflow-hidden mb-6 shadow-sm">
               <table className="w-full text-sm text-left">
-                <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
+                <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="p-4 w-1/3">Column Header</th>
-                    <th className="p-4 w-1/3">First Row Preview</th>
-                    <th className="p-4 w-1/3">Map To Variable</th>
+                    <th className="p-4 w-1/3">Colonne CSV</th>
+                    <th className="p-4 w-1/3">Aperçu</th>
+                    <th className="p-4 w-1/3">Variable Système</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 bg-white">
                   {headers.map((header) => (
                     <tr key={header}>
-                      <td className="p-4 font-medium text-slate-700">{header}</td>
+                      <td className="p-4 font-medium text-slate-900">{header}</td>
                       <td className="p-4 text-slate-500 truncate max-w-xs">{csvData[0][header]}</td>
                       <td className="p-4">
                         <select 
-                          className={`border rounded px-3 py-2 w-full text-sm ${mapping[header] === 'phone' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 font-bold' : 'border-slate-300'}`}
+                          className={`border rounded px-3 py-2 w-full text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none ${mapping[header] === 'phone' ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-900'}`}
                           onChange={(e) => handleMappingChange(header, e.target.value)}
                           value={mapping[header] || 'ignore'}
                         >
-                          <option value="ignore">-- Ignore --</option>
-                          <option value="phone">System: Phone Number</option>
+                          <option value="ignore">-- Ignorer --</option>
+                          <option value="phone">Système : Numéro WhatsApp</option>
                           <option value="Nom">{'{{Nom}}'}</option>
-                          <option value="Prénom">{'{{Prénom}}'}</option>
-                          <option value="Spécialité">{'{{Spécialité}}'}</option>
                           <option value="Ville">{'{{Ville}}'}</option>
-                          <option value="Custom1">{'{{Custom1}}'}</option>
+                          <option value="URL">{'{{URL}}'}</option>
+                          <option value="Spécialité">{'{{Spécialité}}'}</option>
                         </select>
                       </td>
                     </tr>
@@ -331,104 +455,219 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                 </tbody>
               </table>
             </div>
-            
-            <div className="mt-6 flex justify-between items-center">
-               <div className="text-sm text-slate-500">
-                  {csvData.length} contacts loaded
-               </div>
-               <div className="flex gap-3">
-                 <button onClick={() => setStep(1)} className="px-4 py-2 text-slate-500 hover:bg-slate-50 rounded">Back</button>
-                 <button 
-                  onClick={() => {
-                      if (!Object.values(mapping).includes('phone')) {
-                          alert("You must map at least one column to 'Phone Number'");
-                          return;
-                      }
-                      setStep(3);
-                  }} 
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2"
-                 >
-                   Next Step <ArrowRight size={16} />
-                 </button>
-               </div>
+            <div className="flex justify-between">
+               <button onClick={() => setStep(1)} className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium">Retour</button>
+               <button onClick={() => {
+                  if (!Object.values(mapping).includes('phone')) return alert("Le numéro est obligatoire.");
+                  setStep(3);
+               }} className="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 shadow-lg shadow-blue-200">
+                 Suivant <ArrowRight size={18} />
+               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 3: TEMPLATE */}
+        {/* STEP 3: REVIEW */}
         {step === 3 && (
+            <div className="flex flex-col h-full p-6 bg-slate-50/50">
+                <div className="flex justify-between items-end mb-4">
+                    <div>
+                        <h3 className="text-lg font-bold text-slate-900">Vérification des Données</h3>
+                        <p className="text-sm text-slate-500">Total: <strong>{csvData.length}</strong> contacts.</p>
+                    </div>
+                    
+                    {/* SAVE LIST OPTION */}
+                    <div className="flex items-center gap-2">
+                        {saveListMode ? (
+                            <div className="flex items-center gap-2 bg-white p-1 pr-2 rounded-lg border border-purple-200 shadow-sm animate-in fade-in slide-in-from-right-4">
+                                <input 
+                                    autoFocus
+                                    className="text-sm p-1.5 border border-slate-300 rounded bg-white text-slate-900 w-48 outline-none focus:border-purple-500"
+                                    placeholder="Nom de la liste..."
+                                    value={newListName}
+                                    onChange={e => setNewListName(e.target.value)}
+                                />
+                                <button onClick={handleSaveList} disabled={isSavingList} className="bg-purple-600 hover:bg-purple-700 text-white p-1.5 rounded">
+                                    {isSavingList ? <Loader2 size={16} className="animate-spin"/> : <CheckCircle2 size={16}/>}
+                                </button>
+                                <button onClick={() => setSaveListMode(false)} className="text-slate-400 hover:text-slate-600"><X size={16}/></button>
+                            </div>
+                        ) : (
+                             <button onClick={() => setSaveListMode(true)} className="flex items-center gap-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-3 py-2 rounded-lg transition-colors">
+                                <Save size={14} /> Sauvegarder cette liste
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex-1 overflow-hidden flex flex-col">
+                    <div className="overflow-x-auto flex-1">
+                        <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-100 text-slate-700 font-bold sticky top-0 z-10 shadow-sm">
+                                <tr>
+                                    <th className="p-3 w-16 text-center">#</th>
+                                    <th className="p-3">Nom</th>
+                                    <th className="p-3">Numéro (WhatsApp)</th>
+                                    <th className="p-3">Ville</th>
+                                    <th className="p-3">URL Dossier</th>
+                                    <th className="p-3">Spécialité</th>
+                                    <th className="p-3 w-24 text-center">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {paginatedData.map((row, i) => {
+                                    const realIndex = (currentPage - 1) * rowsPerPage + i;
+                                    const isEditing = editingRowIndex === realIndex;
+                                    const phoneVal = getMappedValue(row, 'phone');
+                                    const getKey = (sysVar: string) => Object.keys(mapping).find(k => mapping[k] === sysVar);
+
+                                    return (
+                                        <tr key={realIndex} className={`hover:bg-slate-50 group ${!phoneVal ? 'bg-red-50' : ''}`}>
+                                            <td className="p-3 text-center text-slate-400 font-mono text-xs">{realIndex + 1}</td>
+                                            <td className="p-3 text-slate-900">
+                                                {isEditing ? <input className="w-full p-1 border rounded bg-white text-slate-900" value={editValues[getKey('Nom')!] || ''} onChange={e => setEditValues({...editValues, [getKey('Nom')!]: e.target.value})} /> : (getMappedValue(row, 'Nom') || '-')}
+                                            </td>
+                                            <td className="p-3">
+                                                {isEditing ? <input className="w-full p-1 border rounded font-mono bg-white text-slate-900" value={editValues[getKey('phone')!] || ''} onChange={e => setEditValues({...editValues, [getKey('phone')!]: e.target.value})} /> : 
+                                                <span className={`font-mono font-medium ${!phoneVal ? 'text-red-500' : 'text-slate-700'}`}>{phoneVal || "MANQUANT"}</span>}
+                                            </td>
+                                            <td className="p-3 text-slate-900">
+                                                {isEditing ? <input className="w-full p-1 border rounded bg-white text-slate-900" value={editValues[getKey('Ville')!] || ''} onChange={e => setEditValues({...editValues, [getKey('Ville')!]: e.target.value})} /> : (getMappedValue(row, 'Ville') || '-')}
+                                            </td>
+                                            <td className="p-3 max-w-[150px] truncate text-xs text-blue-600">
+                                                {isEditing ? <input className="w-full p-1 border rounded bg-white text-slate-900" value={editValues[getKey('URL')!] || ''} onChange={e => setEditValues({...editValues, [getKey('URL')!]: e.target.value})} /> : (getMappedValue(row, 'URL') || '-')}
+                                            </td>
+                                            <td className="p-3 text-slate-900">
+                                                {isEditing ? <input className="w-full p-1 border rounded bg-white text-slate-900" value={editValues[getKey('Spécialité')!] || ''} onChange={e => setEditValues({...editValues, [getKey('Spécialité')!]: e.target.value})} /> : 
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700">{getMappedValue(row, 'Spécialité') || 'N/A'}</span>}
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                {isEditing ? (
+                                                    <div className="flex gap-2 justify-center"><button onClick={() => saveEdit(realIndex)} className="text-emerald-600 hover:text-emerald-700"><Save size={16}/></button><button onClick={() => setEditingRowIndex(null)} className="text-slate-400 hover:text-slate-600"><X size={16}/></button></div>
+                                                ) : (
+                                                    <div className="flex gap-2 justify-center opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={() => startEditing(realIndex)} className="text-blue-400 hover:text-blue-600"><Edit2 size={16}/></button><button onClick={() => deleteRow(realIndex)} className="text-red-300 hover:text-red-500"><Trash2 size={16}/></button></div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div className="border-t border-slate-200 p-3 bg-slate-50 flex justify-between items-center">
+                        <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="px-3 py-1 border rounded bg-white text-slate-600 hover:bg-slate-100 flex items-center gap-1 text-xs font-bold disabled:opacity-50"><ChevronLeft size={14} /> Précédent</button>
+                        <span className="text-xs text-slate-500 font-medium">Page {currentPage} sur {totalPages || 1}</span>
+                        <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="px-3 py-1 border rounded bg-white text-slate-600 hover:bg-slate-100 flex items-center gap-1 text-xs font-bold disabled:opacity-50">Suivant <ChevronRight size={14} /></button>
+                    </div>
+                </div>
+
+                <div className="flex justify-end gap-3 mt-4">
+                    <button onClick={() => setStep(2)} className="px-6 py-2 text-slate-600 hover:bg-white rounded-lg font-medium">Retour</button>
+                    <button onClick={() => setStep(4)} className="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 font-bold flex items-center gap-2 shadow-lg shadow-blue-200">
+                        Valider la liste <ArrowRight size={18} />
+                    </button>
+                </div>
+            </div>
+        )}
+
+        {/* STEP 4: TEMPLATE (Refined Visuals) */}
+        {step === 4 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 h-full">
-            <div className="p-8 border-r border-slate-100 flex flex-col">
+            <div className="p-8 border-r border-slate-200 flex flex-col bg-white">
                <div className="mb-6">
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Campaign Name</label>
+                  <label className="block text-sm font-bold text-slate-800 mb-2 uppercase tracking-wide">Nom de la Campagne</label>
+                  {/* FORCE WHITE BACKGROUND AND DARK TEXT */}
                   <input 
                     type="text" 
-                    value={campaignName}
-                    onChange={(e) => setCampaignName(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-blue-500 outline-none" 
+                    value={campaignName} 
+                    onChange={(e) => setCampaignName(e.target.value)} 
+                    className="w-full p-3 bg-white border border-slate-300 rounded-lg text-slate-900 font-medium focus:ring-2 focus:ring-blue-500 outline-none shadow-sm" 
                   />
                </div>
 
                <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-semibold text-slate-900">Message Template</h3>
-                  <div className="flex gap-2">
+                  <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wide">Message</h3>
+                  <div className="flex gap-2 flex-wrap">
                     {Object.entries(mapping).filter(k => k[1] !== 'ignore' && k[1] !== 'phone').map(([k, v]) => (
-                        <button 
-                            key={k} 
-                            onClick={() => setTemplate(prev => prev + ` {{${v}}}`)}
-                            className="text-xs bg-slate-100 border border-slate-200 px-2 py-1 rounded hover:bg-slate-200"
-                        >
+                        <button key={k} onClick={() => setTemplate(prev => prev + ` {{${v}}}`)} className="text-xs bg-slate-100 border border-slate-300 text-slate-700 px-2 py-1 rounded hover:bg-slate-200 transition-colors font-medium">
                             {`{{${v}}}`}
                         </button>
                     ))}
                   </div>
                </div>
+               
+               {/* FORCE WHITE BACKGROUND AND DARK TEXT */}
                <textarea 
-                  value={template}
-                  onChange={(e) => setTemplate(e.target.value)}
-                  className="w-full flex-1 min-h-[200px] p-4 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm leading-relaxed"
-                  placeholder="Hello {{Name}}..."
-               ></textarea>
-               <div className="mt-2 text-xs text-slate-500 flex justify-between">
-                 <span>Use <code>{`{Option A|Option B}`}</code> for Spintax.</span>
+                value={template} 
+                onChange={(e) => setTemplate(e.target.value)} 
+                className="w-full flex-1 min-h-[250px] p-4 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 outline-none shadow-inner resize-none" 
+                placeholder="Bonjour Dr {{Nom}}..." 
+               />
+               
+               <div className="mt-2 text-xs text-slate-500 flex justify-between font-medium">
+                 <span>Spintax : <code>{`{Bonjour|Salam}`}</code></span>
                  <span className={template.length > 1000 ? "text-red-500" : ""}>{template.length} chars</span>
                </div>
             </div>
 
-            <div className="p-8 bg-slate-50 flex flex-col">
-               <h3 className="font-semibold text-slate-900 mb-4">Live Preview (Row 1)</h3>
+            <div className="p-8 bg-slate-100 flex flex-col items-center justify-center">
+               <h3 className="font-bold text-slate-400 mb-6 text-sm uppercase tracking-widest">Aperçu WhatsApp</h3>
                
-               {/* WhatsApp Bubble Simulation */}
-               <div className="bg-[#e5ddd5] p-4 rounded-lg flex-1 mb-6 relative overflow-hidden border border-slate-200 shadow-inner flex flex-col justify-end">
-                  <div className="absolute inset-0 opacity-10 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')]"></div>
+               {/* IMPROVED WHATSAPP PREVIEW */}
+               <div className="w-[320px] bg-[#ECE5DD] rounded-[30px] overflow-hidden shadow-2xl border-8 border-slate-800 relative flex flex-col h-[550px]">
+                  {/* iPhone Top Bar */}
+                  <div className="h-6 bg-[#008069] w-full flex justify-between items-center px-4">
+                      <div className="text-[10px] text-white font-medium">12:30</div>
+                      <div className="flex gap-1">
+                          <div className="w-3 h-3 bg-white/20 rounded-full"></div>
+                          <div className="w-3 h-3 bg-white/20 rounded-full"></div>
+                      </div>
+                  </div>
+
+                  {/* Header */}
+                  <div className="bg-[#008069] px-3 py-2 flex items-center gap-2 shadow-sm z-10">
+                      <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
+                          <Users size={16} />
+                      </div>
+                      <div className="flex-1 text-white">
+                          <div className="font-bold text-sm truncate w-32">
+                              Dr {csvData[0] ? getMappedValue(csvData[0], 'Nom') || 'Alami' : 'Alami'}
+                          </div>
+                          <div className="text-[10px] opacity-80">en ligne</div>
+                      </div>
+                  </div>
+
+                  {/* Chat Area */}
+                  <div className="flex-1 p-3 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] opacity-90 flex flex-col justify-end">
+                      {/* Message Bubble (Sent) */}
+                      <div className="self-end bg-[#E7FFDB] p-2 pl-3 pr-2 rounded-lg rounded-tr-none shadow-sm max-w-[85%] text-sm text-[#111b21] leading-snug relative mb-2">
+                          <p className="whitespace-pre-wrap mb-1">{getPreview()}</p>
+                          <div className="flex justify-end items-center gap-1">
+                              <span className="text-[10px] text-[#667781]">12:31</span>
+                              <CheckCircle2 size={12} className="text-[#53bdeb]" /> {/* Blue ticks */}
+                          </div>
+                          
+                          {/* Triangle tip */}
+                          <div className="absolute top-0 -right-2 w-0 h-0 border-t-[10px] border-t-[#E7FFDB] border-r-[10px] border-r-transparent"></div>
+                      </div>
+                  </div>
                   
-                  <div className="relative self-start bg-white p-3 rounded-lg shadow-sm rounded-tl-none max-w-[90%] text-sm text-slate-800 leading-snug mb-2">
-                     <div className="font-bold text-xs text-orange-400 mb-1">
-                        +212 {csvData[0] ? (csvData[0][Object.keys(mapping).find(key => mapping[key] === 'phone') || ''] || '...').replace(/\D/g,'').slice(-9) : '...'}
-                     </div>
-                     <p className="whitespace-pre-wrap">{getPreview()}</p>
-                     <div className="text-[10px] text-slate-400 text-right mt-1 flex items-center justify-end gap-1">
-                        10:42 AM <CheckCircle size={10} className="text-blue-400" />
-                     </div>
+                  {/* Bottom Bar Input Mock */}
+                  <div className="bg-[#f0f2f5] px-2 py-2 flex items-center gap-2">
+                       <div className="w-6 h-6 rounded-full bg-slate-300"></div>
+                       <div className="flex-1 h-8 bg-white rounded-full"></div>
+                       <div className="w-8 h-8 rounded-full bg-[#008069] flex items-center justify-center text-white">
+                           <PlayCircle size={16} fill="white" />
+                       </div>
                   </div>
                </div>
 
-               <div className="space-y-3">
-                 <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800 flex gap-2">
-                    <AlertCircle size={14} className="mt-0.5" />
-                    <p>Before launching, ensure your WhatsApp instance is connected and has enough battery.</p>
-                 </div>
+               <div className="w-full max-w-sm mt-8 space-y-3">
                  <div className="flex gap-3">
-                    <button onClick={() => setStep(2)} className="flex-1 py-3 border border-slate-300 bg-white rounded-lg text-slate-700 font-medium hover:bg-slate-50">
-                        Back
-                    </button>
-                    <button 
-                        onClick={handleLaunch} 
-                        disabled={isLaunching}
-                        className="flex-1 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 disabled:opacity-70 disabled:cursor-not-allowed"
-                    >
+                    <button onClick={() => setStep(3)} className="flex-1 py-3 border border-slate-300 bg-white rounded-lg text-slate-700 font-medium hover:bg-slate-50">Retour</button>
+                    <button onClick={handleLaunch} disabled={isLaunching} className="flex-1 py-3 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 disabled:opacity-70 disabled:cursor-not-allowed">
                         {isLaunching ? <Loader2 className="animate-spin" /> : <PlayCircle size={18} />}
-                        {isLaunching ? 'Uploading...' : 'Launch Campaign'}
+                        {isLaunching ? 'Lancement...' : 'Lancer la Campagne'}
                     </button>
                  </div>
                </div>
