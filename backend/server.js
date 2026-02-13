@@ -361,7 +361,8 @@ async function connectToWhatsApp() {
                 console.log(`Connection closed. Status: ${statusCode}, Reason: ${error?.message}`);
 
                 const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
-                
+                const isConflict = statusCode === 440; // Connection Replaced
+
                 if (isLoggedOut) {
                     console.log("🛑 FATAL ERROR (401/403). Session invalidated. Wiping DB...");
                     
@@ -376,6 +377,15 @@ async function connectToWhatsApp() {
 
                     // 3. Restart immediately to generate new QR
                     await delay(2000);
+                    connectToWhatsApp();
+                } else if (isConflict) {
+                    console.log("⚠️ 440 CONFLICT: Another session is active. Waiting 10s before retrying...");
+                    // IMPORTANT: Wait longer to allow the other session (possibly an old zombie process) to die
+                    if(sock) { try { sock.end(undefined); } catch(e){} sock = null; }
+                    qrCodeData = null;
+                    connectionStatus = 'disconnected';
+                    isConnecting = false;
+                    await delay(10000); 
                     connectToWhatsApp();
                 } else {
                     console.log("⚠️ Connection dropped. Reconnecting in 5s...");
@@ -638,6 +648,23 @@ fastify.delete('/lists/items/:itemId', async (req) => {
     if (item) { const { count } = await supabase.from('list_items').select('*', { count: 'exact', head: true }).eq('list_id', item.list_id); await supabase.from('contact_lists').update({ total_contacts: count }).eq('id', item.list_id); }
     return { success: true };
 });
+
+// --- GRACEFUL SHUTDOWN (CRITICAL FOR RENDER DEPLOYMENTS) ---
+const shutdown = async () => {
+    console.log('🛑 Shutting down gracefully...');
+    if (sock) {
+        try {
+            sock.end(undefined); // Close WhatsApp socket
+            console.log('WhatsApp socket closed.');
+        } catch (e) {
+            console.error('Error closing socket:', e);
+        }
+    }
+    process.exit(0);
+};
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
 
 const start = async () => {
     try { 
