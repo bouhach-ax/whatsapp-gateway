@@ -363,43 +363,42 @@ async function connectToWhatsApp() {
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
+        
         if (qr) {
             qrCodeData = await QRCode.toDataURL(qr, { errorCorrectionLevel: 'M', type: 'image/png', margin: 4, scale: 10 });
             connectionStatus = 'pairing';
         }
-        if (connection === 'close') {
-            const statusCode = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401;
-            
-            console.log('Connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect);
 
-            // CRITICAL FIX: IF 401 Unauthorized (Session Invalid), WIPE DATA AUTOMATICALLY
-            if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
-                console.log("🛑 401 Unauthorized / Session Invalid. AUTO-WIPING DATA to allow re-pairing.");
+        if (connection === 'close') {
+            const error = lastDisconnect.error;
+            // Loosely check for Boom error structure without depending on 'instanceof' which can fail across versions/bundles
+            const statusCode = error?.output?.statusCode || error?.data?.status || 0;
+            
+            console.log('Connection closed due to ', error, ', StatusCode:', statusCode);
+
+            const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
+            
+            if (isLoggedOut) {
+                console.log("🛑 Session Invalid (401/403). AUTO-WIPING DATA to allow re-pairing.");
                 
                 // 1. Wipe Supabase Auth
                 await supabase.from('baileys_auth').delete().neq('key', 'keep_safe');
                 
                 // 2. Reset Local State
-                sock = null;
+                if(sock) { try { sock.end(undefined); } catch(e){} sock = null; }
                 qrCodeData = null;
                 connectionStatus = 'disconnected';
                 
-                // 3. Restart to generate new QR
+                // 3. Restart to generate new QR immediately
                 await delay(3000);
                 connectToWhatsApp();
-                return;
-            }
-            
-            if (!shouldReconnect) {
-                connectionStatus = 'disconnected';
-                qrCodeData = null;
-                // DO NOT DELETE AUTH HERE AUTOMATICALLY - IT CAUSES LOOPS unless it is 401
             } else {
+                console.log("⚠️ Connection dropped. Reconnecting...");
                 await delay(5000);
                 connectToWhatsApp();
             }
         } else if (connection === 'open') {
+            console.log("✅ Connection Opened");
             connectionStatus = 'connected';
             qrCodeData = null;
             startWorker(); // Resume work on reconnect
@@ -408,6 +407,11 @@ async function connectToWhatsApp() {
 }
 
 // --- ROUTES ---
+
+// NEW: Root route to prevent 404 logs from Health Checks
+fastify.get('/', async () => {
+    return { status: 'online', service: 'WhatsApp Gateway' };
+});
 
 fastify.get('/instance/status', async () => ({
     status: connectionStatus,
