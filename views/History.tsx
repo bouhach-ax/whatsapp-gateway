@@ -61,11 +61,12 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
             }));
 
             // 3. Create new campaign
+            // We explicitely pass mapping as NULL to trigger the 'direct key' logic in backend
             await api.createCampaign({
-                name: `${campaign.name} (Relance ${new Date().toLocaleDateString()})`,
+                name: `${campaign.name} (Relance ${new Date().toLocaleDateString('fr-FR')})`,
                 template: campaign.template,
                 contacts: formattedContacts,
-                mapping: {} // No mapping needed as we pre-formatted 'phone' and keys are already in data
+                mapping: null 
             });
 
             // 4. Redirect to Dashboard
@@ -73,7 +74,7 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
 
         } catch (e) {
             console.error(e);
-            alert("Erreur lors de la relance de la campagne.");
+            alert("Erreur lors de la relance de la campagne : " + e);
         } finally {
             setRerunningId(null);
         }

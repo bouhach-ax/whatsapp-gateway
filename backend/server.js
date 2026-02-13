@@ -447,13 +447,30 @@ fastify.post('/campaigns', async (req) => {
     const { data: camp, error: errCamp } = await supabase.from('campaigns').insert({ name, template, status: 'running' }).select().single();
     if (errCamp) throw errCamp;
 
+    // FIX FOR RE-RUN MAPPING LOGIC
+    // We strictly check if mapping exists AND has keys. If not, we fall back to direct key usage.
+    const hasMapping = mapping && Object.keys(mapping).length > 0;
+
     const contactRows = contacts.map(c => {
         let phoneRaw = null;
-        if (mapping) { const phoneKey = Object.keys(mapping).find(key => mapping[key] === 'phone'); if (phoneKey) phoneRaw = c[phoneKey]; }
+        if (hasMapping) { 
+            const phoneKey = Object.keys(mapping).find(key => mapping[key] === 'phone'); 
+            if (phoneKey) phoneRaw = c[phoneKey]; 
+        }
+        // Fallback for phone
         if (!phoneRaw) { phoneRaw = c.phone || c.numero || Object.values(c)[0]; }
+        
         const metaData = {};
-        if (mapping) { Object.entries(mapping).forEach(([csvHeader, varName]) => { if (varName !== 'ignore' && varName !== 'phone') { metaData[varName] = c[csvHeader]; } }); } 
-        else { Object.keys(c).forEach(k => { if (k !== 'phone' && k !== 'numero') metaData[k] = c[k]; }); }
+        if (hasMapping) { 
+            Object.entries(mapping).forEach(([csvHeader, varName]) => { 
+                if (varName !== 'ignore' && varName !== 'phone') { metaData[varName] = c[csvHeader]; } 
+            }); 
+        } else { 
+            // DIRECT MAPPING (For Rerun)
+            Object.keys(c).forEach(k => { 
+                if (k !== 'phone' && k !== 'numero') metaData[k] = c[k]; 
+            }); 
+        }
         return { campaign_id: camp.id, phone: phoneRaw, data: metaData, status: 'pending' };
     });
 
