@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Play, Pause, Activity, Send, AlertTriangle, 
   Smartphone, Terminal, CheckCircle2, ShieldCheck, Flame, 
-  PauseCircle, Database, Layers, Square, Hourglass, WifiOff
+  PauseCircle, Database, Layers, Square, Hourglass, WifiOff, HelpCircle
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { WorkerLog, Campaign } from '../types';
@@ -18,6 +18,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
   const [logs, setLogs] = useState<WorkerLog[]>([]);
   const [workerStatus, setWorkerStatus] = useState<'idle'|'running'|'paused'>('idle');
   const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 250 });
+  const [stopping, setStopping] = useState(false);
 
   // Poll for REAL updates from Backend
   useEffect(() => {
@@ -37,6 +38,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                 onCampaignUpdate(data.campaign);
                 if (data.logs) setLogs(data.logs);
                 setWorkerStatus(data.workerStatus);
+            } else if (activeCampaign && !data.active) {
+                // If we think we are active, but backend says no, refresh page state or reload
+                window.location.reload(); 
             }
         } catch (e) {
             console.error("Failed to fetch campaign status");
@@ -44,19 +48,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
     }, intervalTime);
 
     return () => clearInterval(interval);
-  }, [instanceStatus, onCampaignUpdate]);
+  }, [instanceStatus, onCampaignUpdate, activeCampaign]);
 
   const toggleCampaign = async () => {
     await api.toggleCampaign();
   };
 
   const stopCampaign = async () => {
-      if (confirm("ATTENTION : Cela va arrêter définitivement la campagne en cours. Vous ne pourrez pas la reprendre. Continuer ?")) {
-          await api.stopCampaign();
-          // Force refresh immediately
-          const data = await api.getCurrentCampaignStatus();
-          if (data && data.active) onCampaignUpdate(data.campaign);
-          else window.location.reload();
+      if (confirm("ATTENTION : Cela va arrêter DÉFINITIVEMENT la campagne en cours. Elle sera marquée comme terminée. Continuer ?")) {
+          setStopping(true);
+          try {
+            await api.stopCampaign();
+            // Force reload to clear state cleanly
+            setTimeout(() => window.location.reload(), 1000);
+          } catch (e) {
+            alert("Erreur lors de l'arrêt. Le serveur est peut-être injoignable.");
+            setStopping(false);
+          }
       }
   };
 
@@ -183,28 +191,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                      En attente de connexion...
                  </div>
             ) : (
-                <button 
-                    onClick={toggleCampaign}
-                    disabled={instanceStatus !== 'connected'}
-                    className={`flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 active:scale-95 ${
-                    workerStatus === 'running'
-                        ? 'bg-white text-amber-600 border-2 border-amber-100 hover:border-amber-200' 
-                        : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
-                    } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                    {workerStatus === 'running' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
-                    {workerStatus === 'running' ? 'PAUSE PROD' : 'START PROD'}
-                </button>
+                <div className="flex flex-col items-center">
+                    <button 
+                        onClick={toggleCampaign}
+                        disabled={instanceStatus !== 'connected'}
+                        title={workerStatus === 'running' ? "Mettre en Pause" : "Reprendre l'envoi"}
+                        className={`flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 active:scale-95 ${
+                        workerStatus === 'running'
+                            ? 'bg-white text-amber-600 border-2 border-amber-100 hover:border-amber-200' 
+                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                        {workerStatus === 'running' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                        {workerStatus === 'running' ? 'PAUSE PROD' : 'START PROD'}
+                    </button>
+                    <span className="text-[10px] text-slate-400 mt-1 uppercase font-semibold">
+                        {workerStatus === 'running' ? 'Suspendre' : 'Démarrer'}
+                    </span>
+                </div>
             )}
             
             {/* STOP BUTTON */}
-            <button 
-                onClick={stopCampaign}
-                title="Arrêt d'urgence définitif"
-                className="bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 hover:border-red-200 p-4 rounded-xl transition-colors"
-            >
-                <Square size={24} fill="currentColor" />
-            </button>
+            <div className="flex flex-col items-center">
+                <button 
+                    onClick={stopCampaign}
+                    disabled={stopping}
+                    title="Arrêt d'urgence définitif (Marquer comme terminé)"
+                    className="bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 hover:border-red-200 p-4 rounded-xl transition-colors disabled:opacity-50"
+                >
+                    {stopping ? <div className="animate-spin h-6 w-6 border-2 border-red-500 border-t-transparent rounded-full"/> : <Square size={24} fill="currentColor" />}
+                </button>
+                <span className="text-[10px] text-slate-400 mt-1 uppercase font-semibold">Stop</span>
+            </div>
         </div>
       </div>
 

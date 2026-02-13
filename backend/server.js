@@ -457,7 +457,7 @@ fastify.post('/campaigns', async (req) => {
             const phoneKey = Object.keys(mapping).find(key => mapping[key] === 'phone'); 
             if (phoneKey) phoneRaw = c[phoneKey]; 
         }
-        // Fallback for phone
+        // Fallback for phone: If no mapping, assume 'phone' key exists in object
         if (!phoneRaw) { phoneRaw = c.phone || c.numero || Object.values(c)[0]; }
         
         const metaData = {};
@@ -537,8 +537,18 @@ fastify.post('/campaigns/toggle', async () => {
 });
 
 fastify.post('/campaigns/stop', async () => {
-    if (!activeCampaignId) return { error: "No active" };
-    await supabase.from('campaigns').update({ status: 'stopped', completed_at: new Date() }).eq('id', activeCampaignId);
+    // FORCE STOP: If no active variable, check DB for any running campaign and stop it
+    if (!activeCampaignId) {
+        const { data: runningCamps } = await supabase.from('campaigns').select('id').eq('status', 'running');
+        if (runningCamps && runningCamps.length > 0) {
+            for (const c of runningCamps) {
+                await supabase.from('campaigns').update({ status: 'stopped', completed_at: new Date() }).eq('id', c.id);
+            }
+        }
+    } else {
+        await supabase.from('campaigns').update({ status: 'stopped', completed_at: new Date() }).eq('id', activeCampaignId);
+    }
+    
     workerStatus = 'idle';
     activeCampaignId = null;
     return { success: true };

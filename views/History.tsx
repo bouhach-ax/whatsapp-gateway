@@ -44,17 +44,19 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
         setRerunningId(campaign.id);
         try {
             // 1. Fetch old contacts from backend
+            console.log("Fetching contacts for campaign:", campaign.id);
             const rawContacts = await api.getCampaignContacts(campaign.id);
+            
             if (!rawContacts || rawContacts.length === 0) {
-                alert("Impossible de relancer : aucun contact trouvé pour cette campagne.");
+                alert("Impossible de relancer : aucun contact trouvé pour cette campagne dans la base de données.");
+                setRerunningId(null);
                 return;
             }
 
+            console.log("Contacts found:", rawContacts.length);
+
             // 2. Format contacts for createCampaign. 
-            // The backend's createCampaign expects a structure it can re-map, OR if we send 
-            // pre-structured data, we avoid mapping.
-            // Since we get { phone: '...', data: { Nom: '...' } }, we flatten it so the backend 
-            // logic (which defaults phone to 'phone' key) works perfectly.
+            // We ensure 'phone' is at top level for the backend check.
             const formattedContacts = rawContacts.map((c: any) => ({
                 phone: c.phone,
                 ...c.data
@@ -62,6 +64,7 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
 
             // 3. Create new campaign
             // We explicitely pass mapping as NULL to trigger the 'direct key' logic in backend
+            console.log("Creating new campaign...");
             await api.createCampaign({
                 name: `${campaign.name} (Relance ${new Date().toLocaleDateString('fr-FR')})`,
                 template: campaign.template,
@@ -69,12 +72,14 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
                 mapping: null 
             });
 
+            console.log("Campaign created. Navigating...");
+
             // 4. Redirect to Dashboard
             onNavigate(Tab.DASHBOARD);
 
         } catch (e) {
-            console.error(e);
-            alert("Erreur lors de la relance de la campagne : " + e);
+            console.error("Rerun failed:", e);
+            alert("Erreur technique lors de la relance. Vérifiez la console.");
         } finally {
             setRerunningId(null);
         }
