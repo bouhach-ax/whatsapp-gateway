@@ -14,6 +14,7 @@ export interface Campaign {
   status: 'draft' | 'running' | 'paused' | 'completed' | 'stopped';
   contacts?: any[]; 
   mapping?: { [key: string]: string }; 
+  template?: string;
   totalContacts: number;
   sentCount: number;
   failedCount: number;

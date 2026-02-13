@@ -81,7 +81,7 @@ export default function App() {
             />
           )}
           {activeTab === Tab.LISTS && <Lists />}
-          {activeTab === Tab.HISTORY && <History />}
+          {activeTab === Tab.HISTORY && <History onNavigate={setActiveTab} />}
           {activeTab === Tab.SETTINGS && <SettingsView />}
         </main>
       </div>

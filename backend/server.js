@@ -556,6 +556,17 @@ fastify.delete('/campaigns/:id', async (req) => {
     return { success: true };
 });
 
+// NEW: GET CONTACTS FOR RERUN
+fastify.get('/campaigns/:id/contacts', async (req) => {
+    const { id } = req.params;
+    const { data, error } = await supabase
+        .from('contacts')
+        .select('phone, data')
+        .eq('campaign_id', id);
+    if(error) throw error;
+    return data;
+});
+
 // List Routes
 fastify.post('/lists', async (req) => {
     const { name, contacts, mapping } = req.body;

@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import { Campaign } from '../types';
-import { Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Loader2, BarChart2 } from 'lucide-react';
+import { Campaign, Tab } from '../types';
+import { Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Loader2, BarChart2, RotateCcw } from 'lucide-react';
 
-export const History: React.FC = () => {
+interface HistoryProps {
+    onNavigate: (tab: Tab) => void;
+}
+
+export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [loading, setLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [rerunningId, setRerunningId] = useState<string | null>(null);
 
     useEffect(() => {
         loadData();
@@ -30,6 +35,47 @@ export const History: React.FC = () => {
             alert("Erreur lors de la suppression");
         } finally {
             setDeletingId(null);
+        }
+    };
+
+    const handleRerun = async (campaign: Campaign) => {
+        if (!confirm(`Relancer la campagne "${campaign.name}" avec les mêmes contacts et le même message ?`)) return;
+        
+        setRerunningId(campaign.id);
+        try {
+            // 1. Fetch old contacts from backend
+            const rawContacts = await api.getCampaignContacts(campaign.id);
+            if (!rawContacts || rawContacts.length === 0) {
+                alert("Impossible de relancer : aucun contact trouvé pour cette campagne.");
+                return;
+            }
+
+            // 2. Format contacts for createCampaign. 
+            // The backend's createCampaign expects a structure it can re-map, OR if we send 
+            // pre-structured data, we avoid mapping.
+            // Since we get { phone: '...', data: { Nom: '...' } }, we flatten it so the backend 
+            // logic (which defaults phone to 'phone' key) works perfectly.
+            const formattedContacts = rawContacts.map((c: any) => ({
+                phone: c.phone,
+                ...c.data
+            }));
+
+            // 3. Create new campaign
+            await api.createCampaign({
+                name: `${campaign.name} (Relance ${new Date().toLocaleDateString()})`,
+                template: campaign.template,
+                contacts: formattedContacts,
+                mapping: {} // No mapping needed as we pre-formatted 'phone' and keys are already in data
+            });
+
+            // 4. Redirect to Dashboard
+            onNavigate(Tab.DASHBOARD);
+
+        } catch (e) {
+            console.error(e);
+            alert("Erreur lors de la relance de la campagne.");
+        } finally {
+            setRerunningId(null);
         }
     };
 
@@ -116,11 +162,21 @@ export const History: React.FC = () => {
                                 </div>
 
                                 {/* Right: Actions */}
-                                <div className="flex items-center">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => handleRerun(c)}
+                                        disabled={rerunningId === c.id || c.status === 'running'}
+                                        className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-sm font-bold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title="Relancer cette campagne"
+                                    >
+                                        {rerunningId === c.id ? <Loader2 size={16} className="animate-spin"/> : <RotateCcw size={16} />}
+                                        Relancer
+                                    </button>
+
                                     <button 
                                         onClick={() => handleDelete(c.id, c.name)}
                                         disabled={deletingId === c.id}
-                                        className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors ml-4"
+                                        className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                                         title="Supprimer l'historique"
                                     >
                                         {deletingId === c.id ? <Loader2 size={20} className="animate-spin" /> : <Trash2 size={20} />}

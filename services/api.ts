@@ -335,5 +335,16 @@ export const api = {
       } catch (e) {
           // fallback
       }
+  },
+
+  // NEW: Get old campaign contacts
+  async getCampaignContacts(id: string): Promise<any[]> {
+      try {
+          const res = await fetch(`${API_URL}/campaigns/${id}/contacts`);
+          if (!res.ok) throw new Error();
+          return res.json();
+      } catch (e) {
+          return [];
+      }
   }
 };
