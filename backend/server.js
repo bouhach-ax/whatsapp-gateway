@@ -1,31 +1,29 @@
 // ... (keep existing imports)
 const fastify = require('fastify')({ 
     logger: true,
-    bodyLimit: 50 * 1024 * 1024 // LIMIT INCREASED TO 50MB for large CSV imports
+    bodyLimit: 50 * 1024 * 1024 
 });
 const cors = require('@fastify/cors');
 const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, delay, BufferJSON, initAuthCreds, proto } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const QRCode = require('qrcode');
 const { createClient } = require('@supabase/supabase-js');
-const crypto = require('crypto'); // Built-in Node module
+const crypto = require('crypto'); 
 
 // --- CONFIGURATION ---
 const SUPABASE_URL = 'https://jccqciuptsyniaxcyfra.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjY3FjaXVwdHN5bmlheGN5ZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5MDY1MzMsImV4cCI6MjA4NjQ4MjUzM30.m-jqjhhnAR2L29lUN99hZOjRIOrj_wogkzJJII8bsU8';
 
-// --- SAFETY CONFIGURATION V3 (HUMAN MIMICRY) ---
-// Drastic changes to simulate real human behavior
-const MIN_DELAY_MS = 15000; // 15 seconds min between msgs in a batch
-const MAX_DELAY_MS = 45000; // 45 seconds max between msgs in a batch
-const INTERACTIVE_PAUSE_MS = 120000; // 2 mins pause if user replies
-const DAILY_SAFETY_CAP = 100; // ⚠️ CRITICAL REDUCTION: Drop to 100/day for safety recovery
+// --- SAFETY CONFIGURATION V4 (POLYMORPHIC) ---
+const MIN_DELAY_MS = 20000; // Increased to 20s
+const MAX_DELAY_MS = 60000; // Increased to 60s
+const INTERACTIVE_PAUSE_MS = 180000; // 3 mins pause if user replies
+const DAILY_SAFETY_CAP = 80; // ⚠️ EXTREME CAUTION MODE ACTIVATED
 
-// BATCHING CONFIG (The "Coffee Break" Logic)
-const MIN_BATCH_SIZE = 2;  // Send at least 2 messages in a row
-const MAX_BATCH_SIZE = 6;  // Send max 6 messages, then stop
-const MIN_BATCH_PAUSE = 300000; // 5 minutes pause minimum
-const MAX_BATCH_PAUSE = 900000; // 15 minutes pause maximum
+const MIN_BATCH_SIZE = 2;
+const MAX_BATCH_SIZE = 5;
+const MIN_BATCH_PAUSE = 400000; // ~7 mins
+const MAX_BATCH_PAUSE = 1200000; // ~20 mins
 
 const STOP_KEYWORDS = ['0', 'stop', 'arret', 'arrêt', 'unsubscribe', 'non', 'no', 'quitter'];
 
@@ -50,14 +48,31 @@ let lastInteractiveTime = 0;
 let isConnecting = false; 
 let consecutiveConflicts = 0; 
 
-// --- MUTEX / ZOMBIE KILLER LOGIC ---
+// --- BROWSER FINGERPRINT GENERATOR (POLYMORPHIC IDENTITY) ---
+function getRandomBrowserConfig() {
+    const platforms = ['Windows', 'macOS', 'Ubuntu', 'Linux'];
+    const browsers = ['Chrome', 'Firefox', 'Edge', 'Safari'];
+    
+    const platform = platforms[Math.floor(Math.random() * platforms.length)];
+    const browserName = browsers[Math.floor(Math.random() * browsers.length)];
+    
+    // Generate a semi-realistic version number (e.g., 124.0.0.0)
+    const major = Math.floor(Math.random() * (126 - 120 + 1)) + 120;
+    const minor = Math.floor(Math.random() * 9);
+    const build = Math.floor(Math.random() * 5000) + 1000;
+    const version = `${major}.0.${build}.${minor}`;
+
+    console.log(`🎭 Generating New Fingerprint: ${platform} / ${browserName} / ${version}`);
+    return [platform, browserName, version];
+}
+
+// --- MUTEX LOGIC ---
 const enforceInstanceUniqueness = async () => {
     try {
         const { error } = await supabase
             .from('baileys_auth')
             .upsert({ key: 'active_instance_owner', value: SERVER_INSTANCE_ID });
         if (error) console.error("Mutex Error:", error.message);
-        console.log(`🔒 Instance Locked: ${SERVER_INSTANCE_ID.split('-')[0]} is now the MASTER.`);
     } catch (e) {
         console.error("Mutex Exception:", e);
     }
@@ -79,7 +94,7 @@ const checkInstanceIntegrity = async () => {
 };
 setInterval(checkInstanceIntegrity, 10000);
 
-// --- CUSTOM SUPABASE AUTH ADAPTER ---
+// --- AUTH ADAPTER ---
 const useSupabaseAuthState = async (supabase) => {
     const writeData = async (data, id) => {
         try {
@@ -161,12 +176,7 @@ function injectInvisibleNoise(text) {
     for (let i = 0; i < suffixLen; i++) {
         suffix += zeroWidthChars[Math.floor(Math.random() * zeroWidthChars.length)];
     }
-    let prefix = '';
-    const prefixLen = Math.floor(Math.random() * 2); 
-    for (let i = 0; i < prefixLen; i++) {
-        prefix += zeroWidthChars[Math.floor(Math.random() * zeroWidthChars.length)];
-    }
-    return prefix + text + suffix;
+    return text + suffix;
 }
 
 function processTemplate(template, data) {
@@ -184,19 +194,18 @@ function processTemplate(template, data) {
     return injectInvisibleNoise(text);
 }
 
-// --- WORKER LOOP (V3 HUMAN BATCHING) ---
+// --- WORKER LOOP (V4 POLYMORPHIC) ---
 async function startWorker() {
     if (workerStatus === 'running') return;
     workerStatus = 'running';
-    console.log("🛡️ Intelligent Worker V3 (Human Mimicry) Started");
+    console.log("🛡️ Intelligent Worker V4 (Polymorphic Stealth) Started");
 
-    // BATCH STATE
     let messagesSentInCurrentBatch = 0;
     let currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
 
     while (workerStatus === 'running') {
         
-        // 1. Interactive Pause check
+        // 1. Pause Logic
         const timeSinceReply = Date.now() - lastInteractiveTime;
         if (timeSinceReply < INTERACTIVE_PAUSE_MS) {
             console.log(`💬 Conversation active. Campaign paused.`);
@@ -204,7 +213,7 @@ async function startWorker() {
             continue;
         }
 
-        // 2. DAILY STANDBY CHECK
+        // 2. Daily Cap
         const todayStr = new Date().toISOString().split('T')[0];
         const { count: dailyTotal, error: countError } = await supabase
             .from('contacts')
@@ -213,37 +222,45 @@ async function startWorker() {
             .gte('sent_at', `${todayStr}T00:00:00.000Z`);
 
         if (!countError && dailyTotal >= DAILY_SAFETY_CAP) {
-            console.log(`⏳ DAILY CAP REACHED (${dailyTotal}/${DAILY_SAFETY_CAP}). Worker sleeping till tomorrow.`);
-            await delay(15 * 60 * 1000); // Sleep 15 mins then check again
+            console.log(`⏳ DAILY CAP REACHED (${dailyTotal}/${DAILY_SAFETY_CAP}).`);
+            await delay(15 * 60 * 1000);
             continue; 
         }
 
-        // 3. HUMAN BATCHING LOGIC (THE FIX)
+        // 3. Batching & Human Pause
         if (messagesSentInCurrentBatch >= currentBatchTarget) {
             const pauseDuration = Math.floor(Math.random() * (MAX_BATCH_PAUSE - MIN_BATCH_PAUSE + 1)) + MIN_BATCH_PAUSE;
             const pauseMinutes = Math.floor(pauseDuration / 60000);
-            console.log(`☕ HUMAN PAUSE: Taking a break for ${pauseMinutes} minutes (Batch of ${messagesSentInCurrentBatch} finished).`);
+            console.log(`☕ HUMAN PAUSE: ${pauseMinutes}m (Batch ${messagesSentInCurrentBatch} done).`);
             
-            // Wait loop to allow stopping during pause
+            // Interaction Check during pause: Read random messages if any
+            // This simulates a user picking up their phone just to check notification bar
+            try {
+                if (sock) {
+                    // Logic to clear presence occasionally
+                    await sock.sendPresenceUpdate('available'); 
+                    await delay(2000);
+                    await sock.sendPresenceUpdate('unavailable');
+                }
+            } catch(e) {}
+
             const increments = 100;
             for (let i = 0; i < increments; i++) {
                 if (workerStatus !== 'running') break;
                 await delay(pauseDuration / increments);
             }
             
-            // Reset Batch
             messagesSentInCurrentBatch = 0;
             currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
-            console.log(`🚀 Resuming. Next batch target: ${currentBatchTarget} messages.`);
-            continue; // Re-evaluate conditions
+            console.log(`🚀 Resuming. Next batch: ${currentBatchTarget}.`);
+            continue; 
         }
 
-        // 4. Get Active Campaign
         if (!activeCampaignId) {
             const { data: campaigns } = await supabase.from('campaigns').select('id').eq('status', 'running').order('created_at', { ascending: false }).limit(1);
             if (campaigns && campaigns.length > 0) {
                 activeCampaignId = campaigns[0].id;
-                console.log(`🔄 Processing Campaign: ${activeCampaignId}`);
+                console.log(`🔄 Processing: ${activeCampaignId}`);
             } else {
                 workerStatus = 'idle';
                 break;
@@ -257,14 +274,12 @@ async function startWorker() {
             }
         }
 
-        // 5. Connection Safety Check
         if (connectionStatus !== 'connected' || !sock) {
             console.log("⚠️ Waiting for connectivity...");
             await delay(5000); 
             continue;
         }
 
-        // 6. Fetch Next Contact
         const { data: contact, error } = await supabase
             .from('contacts')
             .select('*')
@@ -282,7 +297,7 @@ async function startWorker() {
 
         const jid = formatPhoneNumber(contact.phone);
 
-        // 7. Security Checks (Blacklist/Honeypot)
+        // Security Checks
         const { data: blacklistEntry } = await supabase.from('blacklist').select('phone').eq('phone', contact.phone).single();
         if (blacklistEntry) {
             await supabase.from('contacts').update({ status: 'blacklisted', error_message: 'Blacklisted', sent_at: new Date() }).eq('id', contact.id);
@@ -298,44 +313,48 @@ async function startWorker() {
                 continue;
             }
         } catch (e) {
-            console.error("Number check error, skipping safety check to avoid block loop", e);
             await delay(5000);
         }
 
-        // 8. Prepare Message
         const { data: campaignData } = await supabase.from('campaigns').select('template').eq('id', activeCampaignId).single();
         if (!campaignData) { activeCampaignId = null; continue; }
         const message = processTemplate(campaignData.template, contact.data);
 
-        // 9. HUMAN SENDING SIMULATION
+        // --- ADVANCED HUMAN SIMULATION ---
         try {
-            // A. Composing...
-            await sock.sendPresenceUpdate('composing', jid);
-            // Variable typing speed based on message length
-            const typingDuration = Math.min(20000, Math.max(4000, message.length * 80)); 
-            await delay(typingDuration);
-            
-            // B. Pause (Thinking...)
-            await sock.sendPresenceUpdate('paused', jid);
-            await delay(Math.random() * 3000 + 1000); 
-            
-            // C. Resume Composing briefly
-            if (Math.random() > 0.5) {
-                await sock.sendPresenceUpdate('composing', jid);
-                await delay(Math.random() * 2000 + 500);
-            }
+            // 1. Initial Presence (Looking at phone)
+            await sock.sendPresenceUpdate('available', jid);
+            await delay(Math.random() * 2000 + 1000);
 
-            // D. Send
+            // 2. Typing with Hesitation (The "Human Touch")
+            await sock.sendPresenceUpdate('composing', jid);
+            
+            // First chunk of typing
+            await delay(Math.random() * 3000 + 2000);
+            
+            // "Hesitation" - Stop typing, as if reading or correcting
+            await sock.sendPresenceUpdate('paused', jid);
+            await delay(Math.random() * 2000 + 1000);
+            
+            // Resume typing
+            await sock.sendPresenceUpdate('composing', jid);
+            const remainingTyping = Math.min(10000, Math.max(2000, message.length * 50));
+            await delay(remainingTyping);
+
+            // 3. Send
             await sock.sendMessage(jid, { text: message });
             
-            // E. Database Update
             await supabase.from('contacts').update({ status: 'sent', sent_at: new Date() }).eq('id', contact.id);
             
             messagesSentInCurrentBatch++;
             const currentDaily = (dailyTotal || 0) + 1;
-            console.log(`✅ SENT to ${contact.phone} (Daily: ${currentDaily} | Batch: ${messagesSentInCurrentBatch}/${currentBatchTarget})`);
+            console.log(`✅ SENT to ${contact.phone} (D:${currentDaily} | B:${messagesSentInCurrentBatch}/${currentBatchTarget})`);
             
-            // F. Intra-Message Delay (Randomized)
+            // 4. Post-Send Behavior
+            // Do not immediately go offline. Stay "online" for a few seconds like a human watching for ticks.
+            await delay(3000);
+            await sock.sendPresenceUpdate('unavailable', jid);
+
             const nextDelay = Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
             await delay(nextDelay);
 
@@ -367,13 +386,15 @@ async function connectToWhatsApp() {
 
         const { state, saveCreds } = await useSupabaseAuthState(supabase);
         const { version } = await fetchLatestBaileysVersion();
+        
+        // APPLY DYNAMIC BROWSER CONFIG
+        const browserConfig = getRandomBrowserConfig();
 
         sock = makeWASocket({
             version,
             auth: state,
             printQRInTerminal: false,
-            // UPDATED BROWSER FINGERPRINT
-            browser: ["Mac OS", "Chrome", "121.0.6167.140"], 
+            browser: browserConfig, // <--- DYNAMIC FINGERPRINT
             syncFullHistory: false,
             connectTimeoutMs: 60000,
             retryRequestDelayMs: 2000,
@@ -386,18 +407,32 @@ async function connectToWhatsApp() {
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             for (const m of messages) {
-                if (!m.key.fromMe && m.message) {
-                    const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
-                    const cleanText = text.trim().toLowerCase();
-                    const senderPhone = m.key.remoteJid.split('@')[0];
+                // AUTO-READ LOGIC: If we receive a message, we must look like we read it eventually
+                // This improves the Trust Score significantly.
+                if (!m.key.fromMe) {
+                    // 30% chance to read immediately, otherwise ignore for now (simulate busy human)
+                    if (Math.random() > 0.7) {
+                        try {
+                            await delay(Math.random() * 5000 + 2000);
+                            // New Baileys syntax for read receipts
+                            await sock.readMessages([m.key]);
+                            console.log(`👀 Simulated Read Receipt for ${m.key.remoteJid}`);
+                        } catch(e) {}
+                    }
+                    
+                    if (m.message) {
+                        const text = m.message.conversation || m.message.extendedTextMessage?.text || "";
+                        const cleanText = text.trim().toLowerCase();
+                        const senderPhone = m.key.remoteJid.split('@')[0];
 
-                    if (STOP_KEYWORDS.includes(cleanText)) {
-                        console.log(`🛑 OPT-OUT: ${senderPhone}`);
-                        await supabase.from('blacklist').upsert({ phone: senderPhone, reason: 'user_opt_out' });
-                        await supabase.from('contacts').update({ status: 'blacklisted' }).eq('phone', senderPhone).eq('status', 'pending');
-                    } else {
-                        console.log(`📩 Reply from ${senderPhone}. Pausing.`);
-                        lastInteractiveTime = Date.now();
+                        if (STOP_KEYWORDS.includes(cleanText)) {
+                            console.log(`🛑 OPT-OUT: ${senderPhone}`);
+                            await supabase.from('blacklist').upsert({ phone: senderPhone, reason: 'user_opt_out' });
+                            await supabase.from('contacts').update({ status: 'blacklisted' }).eq('phone', senderPhone).eq('status', 'pending');
+                        } else {
+                            console.log(`📩 Reply from ${senderPhone}. Pausing.`);
+                            lastInteractiveTime = Date.now();
+                        }
                     }
                 }
             }
@@ -435,7 +470,6 @@ async function connectToWhatsApp() {
                     console.log(`⚠️ 440 CONFLICT (Count: ${consecutiveConflicts}).`);
                     
                     if (consecutiveConflicts >= 3) {
-                        console.log("🔥 Force restarting process...");
                         process.exit(1); 
                     }
 
