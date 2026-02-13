@@ -8,18 +8,26 @@ const { default: makeWASocket, DisconnectReason, fetchLatestBaileysVersion, dela
 const { Boom } = require('@hapi/boom');
 const QRCode = require('qrcode');
 const { createClient } = require('@supabase/supabase-js');
+const crypto = require('crypto'); // Built-in Node module
 
 // --- CONFIGURATION ---
 const SUPABASE_URL = 'https://jccqciuptsyniaxcyfra.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjY3FjaXVwdHN5bmlheGN5ZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5MDY1MzMsImV4cCI6MjA4NjQ4MjUzM30.m-jqjhhnAR2L29lUN99hZOjRIOrj_wogkzJJII8bsU8';
 
-// SAFETY CONFIGURATION (Anti-Ban STRICT & PARANOID)
-const MIN_DELAY_MS = 30000; // 30 seconds min
-const MAX_DELAY_MS = 60000; // 60 seconds max
-const INTERACTIVE_PAUSE_MS = 120000; // 2 mins pause on reply
-const STANDBY_CHECK_INTERVAL_MS = 15 * 60 * 1000; // Check every 15 mins if new day started
+// --- SAFETY CONFIGURATION V3 (HUMAN MIMICRY) ---
+// Drastic changes to simulate real human behavior
+const MIN_DELAY_MS = 15000; // 15 seconds min between msgs in a batch
+const MAX_DELAY_MS = 45000; // 45 seconds max between msgs in a batch
+const INTERACTIVE_PAUSE_MS = 120000; // 2 mins pause if user replies
+const DAILY_SAFETY_CAP = 100; // ⚠️ CRITICAL REDUCTION: Drop to 100/day for safety recovery
+
+// BATCHING CONFIG (The "Coffee Break" Logic)
+const MIN_BATCH_SIZE = 2;  // Send at least 2 messages in a row
+const MAX_BATCH_SIZE = 6;  // Send max 6 messages, then stop
+const MIN_BATCH_PAUSE = 300000; // 5 minutes pause minimum
+const MAX_BATCH_PAUSE = 900000; // 15 minutes pause maximum
+
 const STOP_KEYWORDS = ['0', 'stop', 'arret', 'arrêt', 'unsubscribe', 'non', 'no', 'quitter'];
-const DAILY_SAFETY_CAP = 250; // ⚠️ HARD LIMIT REVISED: 250 interactions (Sent OR Failed)
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { persistSession: false }
@@ -32,13 +40,44 @@ fastify.register(cors, {
 });
 
 // --- GLOBAL STATE ---
+const SERVER_INSTANCE_ID = crypto.randomUUID(); 
 let sock;
 let qrCodeData = null;
 let connectionStatus = 'disconnected'; 
-let workerStatus = 'idle'; // idle, running, paused
+let workerStatus = 'idle'; 
 let activeCampaignId = null;
-let lastInteractiveTime = 0; // Timestamp of last user reply
-let isConnecting = false; // LOCK to prevent race conditions
+let lastInteractiveTime = 0; 
+let isConnecting = false; 
+let consecutiveConflicts = 0; 
+
+// --- MUTEX / ZOMBIE KILLER LOGIC ---
+const enforceInstanceUniqueness = async () => {
+    try {
+        const { error } = await supabase
+            .from('baileys_auth')
+            .upsert({ key: 'active_instance_owner', value: SERVER_INSTANCE_ID });
+        if (error) console.error("Mutex Error:", error.message);
+        console.log(`🔒 Instance Locked: ${SERVER_INSTANCE_ID.split('-')[0]} is now the MASTER.`);
+    } catch (e) {
+        console.error("Mutex Exception:", e);
+    }
+};
+
+const checkInstanceIntegrity = async () => {
+    try {
+        const { data } = await supabase
+            .from('baileys_auth')
+            .select('value')
+            .eq('key', 'active_instance_owner')
+            .single();
+        if (data && data.value && data.value !== SERVER_INSTANCE_ID) {
+            console.error(`💀 FATAL: Detected another active instance. Shutting down.`);
+            if (sock) sock.end(undefined);
+            process.exit(0);
+        }
+    } catch (e) {}
+};
+setInterval(checkInstanceIntegrity, 10000);
 
 // --- CUSTOM SUPABASE AUTH ADAPTER ---
 const useSupabaseAuthState = async (supabase) => {
@@ -48,9 +87,7 @@ const useSupabaseAuthState = async (supabase) => {
                 .from('baileys_auth')
                 .upsert({ key: id, value: JSON.stringify(data, BufferJSON.replacer) });
             if (error) console.error('Auth Write Error:', error.message);
-        } catch (err) {
-            console.error('Auth Write Exception:', err);
-        }
+        } catch (err) { console.error('Auth Write Exception:', err); }
     };
 
     const readData = async (id) => {
@@ -60,20 +97,14 @@ const useSupabaseAuthState = async (supabase) => {
                 .select('value')
                 .eq('key', id)
                 .single();
-            if (error && error.code !== 'PGRST116') return null; // PGRST116 is "not found"
+            if (error && error.code !== 'PGRST116') return null;
             return data ? JSON.parse(data.value, BufferJSON.reviver) : null;
-        } catch (err) {
-            console.error('Auth Read Exception:', err);
-            return null;
-        }
+        } catch (err) { return null; }
     };
 
     const removeData = async (id) => {
-        try {
-            await supabase.from('baileys_auth').delete().eq('key', id);
-        } catch (err) {
-            console.error('Auth Delete Exception:', err);
-        }
+        try { await supabase.from('baileys_auth').delete().eq('key', id); } 
+        catch (err) { console.error('Auth Delete Exception:', err); }
     };
 
     const creds = (await readData('creds')) || initAuthCreds();
@@ -101,11 +132,8 @@ const useSupabaseAuthState = async (supabase) => {
                         for (const id in data[category]) {
                             const value = data[category][id];
                             const key = `${category}-${id}`;
-                            if (value) {
-                                tasks.push(writeData(value, key));
-                            } else {
-                                tasks.push(removeData(key));
-                            }
+                            if (value) tasks.push(writeData(value, key));
+                            else tasks.push(removeData(key));
                         }
                     }
                     await Promise.all(tasks);
@@ -115,7 +143,6 @@ const useSupabaseAuthState = async (supabase) => {
         saveCreds: () => writeData(creds, 'creds')
     };
 };
-
 
 // --- UTILS ---
 function formatPhoneNumber(phone) {
@@ -127,7 +154,6 @@ function formatPhoneNumber(phone) {
     return cleaned;
 }
 
-// SECRET SAUCE #1: Polymorphic Invisible Noise V2 (Stronger)
 function injectInvisibleNoise(text) {
     const zeroWidthChars = ['\u200B', '\u200C', '\u200D', '\u2060', '\uFEFF'];
     let suffix = '';
@@ -143,7 +169,6 @@ function injectInvisibleNoise(text) {
     return prefix + text + suffix;
 }
 
-// Spintax & Variable Processor
 function processTemplate(template, data) {
     let text = template;
     if (data) {
@@ -159,15 +184,19 @@ function processTemplate(template, data) {
     return injectInvisibleNoise(text);
 }
 
-// --- WORKER LOOP (PARANOID MODE) ---
+// --- WORKER LOOP (V3 HUMAN BATCHING) ---
 async function startWorker() {
     if (workerStatus === 'running') return;
     workerStatus = 'running';
-    console.log("🛡️ Intelligent Worker started (Paranoid Mode)");
+    console.log("🛡️ Intelligent Worker V3 (Human Mimicry) Started");
+
+    // BATCH STATE
+    let messagesSentInCurrentBatch = 0;
+    let currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
 
     while (workerStatus === 'running') {
         
-        // 1. Interactive Pause
+        // 1. Interactive Pause check
         const timeSinceReply = Date.now() - lastInteractiveTime;
         if (timeSinceReply < INTERACTIVE_PAUSE_MS) {
             console.log(`💬 Conversation active. Campaign paused.`);
@@ -175,7 +204,7 @@ async function startWorker() {
             continue;
         }
 
-        // 2. DAILY STANDBY
+        // 2. DAILY STANDBY CHECK
         const todayStr = new Date().toISOString().split('T')[0];
         const { count: dailyTotal, error: countError } = await supabase
             .from('contacts')
@@ -184,23 +213,37 @@ async function startWorker() {
             .gte('sent_at', `${todayStr}T00:00:00.000Z`);
 
         if (!countError && dailyTotal >= DAILY_SAFETY_CAP) {
-            console.log(`⏳ DAILY LIMIT REACHED (${dailyTotal}/${DAILY_SAFETY_CAP}). Entering STANDBY MODE.`);
-            await delay(STANDBY_CHECK_INTERVAL_MS);
+            console.log(`⏳ DAILY CAP REACHED (${dailyTotal}/${DAILY_SAFETY_CAP}). Worker sleeping till tomorrow.`);
+            await delay(15 * 60 * 1000); // Sleep 15 mins then check again
             continue; 
         }
 
-        // 3. Get Active Campaign
-        if (!activeCampaignId) {
-            const { data: campaigns } = await supabase
-                .from('campaigns')
-                .select('id')
-                .eq('status', 'running')
-                .order('created_at', { ascending: false })
-                .limit(1);
+        // 3. HUMAN BATCHING LOGIC (THE FIX)
+        if (messagesSentInCurrentBatch >= currentBatchTarget) {
+            const pauseDuration = Math.floor(Math.random() * (MAX_BATCH_PAUSE - MIN_BATCH_PAUSE + 1)) + MIN_BATCH_PAUSE;
+            const pauseMinutes = Math.floor(pauseDuration / 60000);
+            console.log(`☕ HUMAN PAUSE: Taking a break for ${pauseMinutes} minutes (Batch of ${messagesSentInCurrentBatch} finished).`);
             
+            // Wait loop to allow stopping during pause
+            const increments = 100;
+            for (let i = 0; i < increments; i++) {
+                if (workerStatus !== 'running') break;
+                await delay(pauseDuration / increments);
+            }
+            
+            // Reset Batch
+            messagesSentInCurrentBatch = 0;
+            currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
+            console.log(`🚀 Resuming. Next batch target: ${currentBatchTarget} messages.`);
+            continue; // Re-evaluate conditions
+        }
+
+        // 4. Get Active Campaign
+        if (!activeCampaignId) {
+            const { data: campaigns } = await supabase.from('campaigns').select('id').eq('status', 'running').order('created_at', { ascending: false }).limit(1);
             if (campaigns && campaigns.length > 0) {
                 activeCampaignId = campaigns[0].id;
-                console.log(`🔄 Resuming Campaign ID: ${activeCampaignId}`);
+                console.log(`🔄 Processing Campaign: ${activeCampaignId}`);
             } else {
                 workerStatus = 'idle';
                 break;
@@ -214,14 +257,14 @@ async function startWorker() {
             }
         }
 
-        // 4. Connection Check
+        // 5. Connection Safety Check
         if (connectionStatus !== 'connected' || !sock) {
-            console.log("⚠️ WhatsApp Disconnected. Worker waiting...");
+            console.log("⚠️ Waiting for connectivity...");
             await delay(5000); 
             continue;
         }
 
-        // 5. Fetch Contact
+        // 6. Fetch Next Contact
         const { data: contact, error } = await supabase
             .from('contacts')
             .select('*')
@@ -231,7 +274,7 @@ async function startWorker() {
             .single();
 
         if (error || !contact) {
-            console.log(`Campaign ${activeCampaignId} finished.`);
+            console.log(`Campaign finished.`);
             await supabase.from('campaigns').update({ status: 'completed', completed_at: new Date() }).eq('id', activeCampaignId);
             activeCampaignId = null; 
             continue; 
@@ -239,66 +282,81 @@ async function startWorker() {
 
         const jid = formatPhoneNumber(contact.phone);
 
-        // 6. Blacklist Check
+        // 7. Security Checks (Blacklist/Honeypot)
         const { data: blacklistEntry } = await supabase.from('blacklist').select('phone').eq('phone', contact.phone).single();
         if (blacklistEntry) {
-            await supabase.from('contacts').update({ status: 'blacklisted', error_message: 'User is in blacklist', sent_at: new Date() }).eq('id', contact.id);
-            await delay(2000); 
+            await supabase.from('contacts').update({ status: 'blacklisted', error_message: 'Blacklisted', sent_at: new Date() }).eq('id', contact.id);
             continue;
         }
 
-        // 7. Honeypot Check
         try {
-            if (!jid) throw new Error("Format Invalide");
+            if (!jid) throw new Error("Invalid Phone");
             const [result] = await sock.onWhatsApp(jid);
             if (!result || !result.exists) {
-                await supabase.from('contacts').update({ status: 'invalid', error_message: 'Not on WhatsApp', sent_at: new Date() }).eq('id', contact.id);
-                await delay(5000); 
+                await supabase.from('contacts').update({ status: 'invalid', error_message: 'Not on WA', sent_at: new Date() }).eq('id', contact.id);
+                await delay(2000);
                 continue;
             }
         } catch (e) {
-            console.error("Check OnWhatsApp failed:", e);
-            await delay(10000); 
-            continue; 
+            console.error("Number check error, skipping safety check to avoid block loop", e);
+            await delay(5000);
         }
 
-        // 8. Process Message
+        // 8. Prepare Message
         const { data: campaignData } = await supabase.from('campaigns').select('template').eq('id', activeCampaignId).single();
         if (!campaignData) { activeCampaignId = null; continue; }
         const message = processTemplate(campaignData.template, contact.data);
 
-        // 9. Sending Sequence
+        // 9. HUMAN SENDING SIMULATION
         try {
+            // A. Composing...
             await sock.sendPresenceUpdate('composing', jid);
-            await delay(Math.min(15000, Math.max(3000, message.length * 100)));
+            // Variable typing speed based on message length
+            const typingDuration = Math.min(20000, Math.max(4000, message.length * 80)); 
+            await delay(typingDuration);
+            
+            // B. Pause (Thinking...)
             await sock.sendPresenceUpdate('paused', jid);
-            await delay(1000 + Math.random() * 2000); 
+            await delay(Math.random() * 3000 + 1000); 
+            
+            // C. Resume Composing briefly
+            if (Math.random() > 0.5) {
+                await sock.sendPresenceUpdate('composing', jid);
+                await delay(Math.random() * 2000 + 500);
+            }
+
+            // D. Send
             await sock.sendMessage(jid, { text: message });
             
+            // E. Database Update
             await supabase.from('contacts').update({ status: 'sent', sent_at: new Date() }).eq('id', contact.id);
             
+            messagesSentInCurrentBatch++;
             const currentDaily = (dailyTotal || 0) + 1;
-            console.log(`✅ Sent to ${contact.phone} (Daily: ${currentDaily})`);
+            console.log(`✅ SENT to ${contact.phone} (Daily: ${currentDaily} | Batch: ${messagesSentInCurrentBatch}/${currentBatchTarget})`);
             
-            await delay(Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1) + MIN_DELAY_MS));
+            // F. Intra-Message Delay (Randomized)
+            const nextDelay = Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
+            await delay(nextDelay);
+
         } catch (err) {
             console.error("Send Error:", err);
             await supabase.from('contacts').update({ status: 'failed', error_message: err.message, sent_at: new Date() }).eq('id', contact.id);
-            await delay(20000);
+            await delay(10000);
         }
     }
 }
 
 // --- WHATSAPP CONNECTION ---
 async function connectToWhatsApp() {
-    // 1. PREVENT RACE CONDITIONS
     if (isConnecting) return;
     if (connectionStatus === 'connected') return;
 
     isConnecting = true;
 
     try {
-        // 2. CLEANUP PREVIOUS LISTENERS (Crucial for stability)
+        await enforceInstanceUniqueness();
+
         if (sock) {
             sock.ev.removeAllListeners('connection.update');
             sock.ev.removeAllListeners('creds.update');
@@ -314,12 +372,12 @@ async function connectToWhatsApp() {
             version,
             auth: state,
             printQRInTerminal: false,
-            // UPDATED BROWSER TO AVOID OLD VERSION BAN
-            browser: ["Smartdoc Agent", "Chrome", "125.0.6422.141"], 
+            // UPDATED BROWSER FINGERPRINT
+            browser: ["Mac OS", "Chrome", "121.0.6167.140"], 
             syncFullHistory: false,
             connectTimeoutMs: 60000,
-            retryRequestDelayMs: 2000, // Retry failed requests
-            keepAliveIntervalMs: 10000, // Keep WebSockets alive on Render
+            retryRequestDelayMs: 2000,
+            keepAliveIntervalMs: 10000,
             markOnlineOnConnect: false 
         });
 
@@ -349,7 +407,7 @@ async function connectToWhatsApp() {
             const { connection, lastDisconnect, qr } = update;
             
             if (qr) {
-                console.log("⚡ QR Code generated. Waiting for scan...");
+                console.log("⚡ QR Code generated.");
                 qrCodeData = await QRCode.toDataURL(qr, { errorCorrectionLevel: 'M', type: 'image/png', margin: 4, scale: 10 });
                 connectionStatus = 'pairing';
             }
@@ -358,42 +416,43 @@ async function connectToWhatsApp() {
                 const error = lastDisconnect.error;
                 const statusCode = error?.output?.statusCode || error?.data?.status || 0;
                 
-                console.log(`Connection closed. Status: ${statusCode}, Reason: ${error?.message}`);
+                console.log(`Connection closed. Status: ${statusCode}`);
 
                 const isLoggedOut = statusCode === DisconnectReason.loggedOut || statusCode === 401 || statusCode === 403;
-                const isConflict = statusCode === 440; // Connection Replaced
+                const isConflict = statusCode === 440; 
 
                 if (isLoggedOut) {
-                    console.log("🛑 FATAL ERROR (401/403). Session invalidated. Wiping DB...");
-                    
-                    // 1. Wipe Supabase Auth
+                    console.log("🛑 Session invalidated. Wiping DB...");
                     await supabase.from('baileys_auth').delete().neq('key', 'keep_safe');
-                    
-                    // 2. Reset Local State
-                    if(sock) { try { sock.end(undefined); } catch(e){} sock = null; }
-                    qrCodeData = null;
-                    connectionStatus = 'disconnected';
-                    isConnecting = false; // Unlock
-
-                    // 3. Restart immediately to generate new QR
-                    await delay(2000);
-                    connectToWhatsApp();
-                } else if (isConflict) {
-                    console.log("⚠️ 440 CONFLICT: Another session is active. Waiting 10s before retrying...");
-                    // IMPORTANT: Wait longer to allow the other session (possibly an old zombie process) to die
                     if(sock) { try { sock.end(undefined); } catch(e){} sock = null; }
                     qrCodeData = null;
                     connectionStatus = 'disconnected';
                     isConnecting = false;
-                    await delay(10000); 
+                    await delay(2000);
                     connectToWhatsApp();
-                } else {
-                    console.log("⚠️ Connection dropped. Reconnecting in 5s...");
+                } else if (isConflict) {
+                    consecutiveConflicts++;
+                    console.log(`⚠️ 440 CONFLICT (Count: ${consecutiveConflicts}).`);
+                    
+                    if (consecutiveConflicts >= 3) {
+                        console.log("🔥 Force restarting process...");
+                        process.exit(1); 
+                    }
+
                     if(sock) { try { sock.end(undefined); } catch(e){} sock = null; }
                     qrCodeData = null;
                     connectionStatus = 'disconnected';
-                    isConnecting = false; // Unlock
+                    isConnecting = false;
                     
+                    const randomDelay = Math.floor(Math.random() * 10000) + 5000;
+                    await delay(randomDelay);
+                    connectToWhatsApp();
+                } else {
+                    console.log("⚠️ Connection dropped. Reconnecting...");
+                    if(sock) { try { sock.end(undefined); } catch(e){} sock = null; }
+                    qrCodeData = null;
+                    connectionStatus = 'disconnected';
+                    isConnecting = false;
                     await delay(5000);
                     connectToWhatsApp();
                 }
@@ -401,12 +460,14 @@ async function connectToWhatsApp() {
                 console.log("✅ Connection Opened Successfully");
                 connectionStatus = 'connected';
                 qrCodeData = null;
-                isConnecting = false; // Unlock
+                isConnecting = false; 
+                consecutiveConflicts = 0; 
+                enforceInstanceUniqueness();
                 startWorker();
             }
         });
     } catch (e) {
-        console.error("Fatal Error in connectToWhatsApp:", e);
+        console.error("Fatal Error:", e);
         isConnecting = false;
         await delay(5000);
         connectToWhatsApp();
@@ -414,8 +475,6 @@ async function connectToWhatsApp() {
 }
 
 // --- ROUTES ---
-
-// NEW: Root route and HEAD to prevent 404 logs from Health Checks
 fastify.get('/', async () => ({ status: 'online', service: 'WhatsApp Gateway' }));
 fastify.head('/', async () => ({ status: 'online' }));
 
@@ -426,7 +485,6 @@ fastify.get('/instance/status', async () => ({
 }));
 
 fastify.post('/instance/init', async () => {
-    // Manually trigger connection if not already connecting
     connectToWhatsApp();
     return { status: 'pairing' };
 });
@@ -437,16 +495,12 @@ fastify.post('/instance/logout', async () => {
 });
 
 fastify.post('/instance/reset', async () => {
-    console.log("HARD RESET TRIGGERED");
-    if (sock) {
-        try { sock.end(undefined); } catch(e) {}
-        sock = null;
-    }
+    if (sock) { try { sock.end(undefined); } catch(e) {} sock = null; }
     await supabase.from('baileys_auth').delete().neq('key', 'keep_safe');
     connectionStatus = 'disconnected';
     qrCodeData = null;
     workerStatus = 'idle';
-    isConnecting = false; // Unlock
+    isConnecting = false; 
     await delay(1000);
     connectToWhatsApp();
     return { success: true };
@@ -457,17 +511,13 @@ fastify.post('/campaigns', async (req) => {
     const { data: camp, error: errCamp } = await supabase.from('campaigns').insert({ name, template, status: 'running' }).select().single();
     if (errCamp) throw errCamp;
 
-    // FIX FOR RE-RUN MAPPING LOGIC
-    // We strictly check if mapping exists AND has keys. If not, we fall back to direct key usage.
     const hasMapping = mapping && Object.keys(mapping).length > 0;
-
     const contactRows = contacts.map(c => {
         let phoneRaw = null;
         if (hasMapping) { 
             const phoneKey = Object.keys(mapping).find(key => mapping[key] === 'phone'); 
             if (phoneKey) phoneRaw = c[phoneKey]; 
         }
-        // Fallback for phone: If no mapping, assume 'phone' key exists in object
         if (!phoneRaw) { phoneRaw = c.phone || c.numero || Object.values(c)[0]; }
         
         const metaData = {};
@@ -476,10 +526,7 @@ fastify.post('/campaigns', async (req) => {
                 if (varName !== 'ignore' && varName !== 'phone') { metaData[varName] = c[csvHeader]; } 
             }); 
         } else { 
-            // DIRECT MAPPING (For Rerun)
-            Object.keys(c).forEach(k => { 
-                if (k !== 'phone' && k !== 'numero') metaData[k] = c[k]; 
-            }); 
+            Object.keys(c).forEach(k => { if (k !== 'phone' && k !== 'numero') metaData[k] = c[k]; }); 
         }
         return { campaign_id: camp.id, phone: phoneRaw, data: metaData, status: 'pending' };
     });
@@ -493,7 +540,6 @@ fastify.post('/campaigns', async (req) => {
     return camp;
 });
 
-// GET CURRENT STATUS WITH COCKPIT DATA
 fastify.get('/campaigns/current', async () => {
     const { data: campaign } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false }).limit(1).single();
     const todayStr = new Date().toISOString().split('T')[0];
@@ -517,10 +563,6 @@ fastify.get('/campaigns/current', async () => {
 
     if (Date.now() - lastInteractiveTime < INTERACTIVE_PAUSE_MS) {
         logs.unshift({ id: 'pause_sys', timestamp: new Date().toLocaleTimeString(), type: 'warning', message: "⚠️ PAUSED: User replied." });
-    }
-
-    if (connectionStatus !== 'connected' && workerStatus === 'running') {
-        logs.unshift({ id: 'warn_conn', timestamp: new Date().toLocaleTimeString(), type: 'warning', message: "⚠️ Connection unstable. Waiting for WhatsApp..." });
     }
 
     return {
@@ -547,7 +589,6 @@ fastify.post('/campaigns/toggle', async () => {
 });
 
 fastify.post('/campaigns/stop', async () => {
-    // FORCE STOP: If no active variable, check DB for any running campaign and stop it
     if (!activeCampaignId) {
         const { data: runningCamps } = await supabase.from('campaigns').select('id').eq('status', 'running');
         if (runningCamps && runningCamps.length > 0) {
@@ -558,7 +599,6 @@ fastify.post('/campaigns/stop', async () => {
     } else {
         await supabase.from('campaigns').update({ status: 'stopped', completed_at: new Date() }).eq('id', activeCampaignId);
     }
-    
     workerStatus = 'idle';
     activeCampaignId = null;
     return { success: true };
@@ -593,18 +633,14 @@ fastify.delete('/campaigns/:id', async (req) => {
     return { success: true };
 });
 
-// NEW: GET CONTACTS FOR RERUN
 fastify.get('/campaigns/:id/contacts', async (req) => {
     const { id } = req.params;
-    const { data, error } = await supabase
-        .from('contacts')
-        .select('phone, data')
-        .eq('campaign_id', id);
+    const { data, error } = await supabase.from('contacts').select('phone, data').eq('campaign_id', id);
     if(error) throw error;
     return data;
 });
 
-// List Routes
+// List Routes (omitted for brevity, same as before)
 fastify.post('/lists', async (req) => {
     const { name, contacts, mapping } = req.body;
     const { data: list, error: errList } = await supabase.from('contact_lists').insert({ name, total_contacts: contacts.length }).select().single();
@@ -649,30 +685,18 @@ fastify.delete('/lists/items/:itemId', async (req) => {
     return { success: true };
 });
 
-// --- GRACEFUL SHUTDOWN (CRITICAL FOR RENDER DEPLOYMENTS) ---
 const shutdown = async () => {
     console.log('🛑 Shutting down gracefully...');
-    if (sock) {
-        try {
-            sock.end(undefined); // Close WhatsApp socket
-            console.log('WhatsApp socket closed.');
-        } catch (e) {
-            console.error('Error closing socket:', e);
-        }
-    }
+    if (sock) { try { sock.end(undefined); } catch (e) {} }
     process.exit(0);
 };
-
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 const start = async () => {
     try { 
         await fastify.listen({ port: process.env.PORT || 3000, host: '0.0.0.0' }); 
-        // Initial connection start
         connectToWhatsApp(); 
-    } catch (err) { 
-        process.exit(1); 
-    }
+    } catch (err) { process.exit(1); }
 };
 start();

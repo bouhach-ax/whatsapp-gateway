@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { Campaign, Tab } from '../types';
-import { Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Loader2, BarChart2, RotateCcw } from 'lucide-react';
+import { Calendar, Clock, CheckCircle2, AlertTriangle, Trash2, Loader2, BarChart2, RotateCcw, X } from 'lucide-react';
 
 interface HistoryProps {
     onNavigate: (tab: Tab) => void;
@@ -12,6 +12,18 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
     const [loading, setLoading] = useState(true);
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [rerunningId, setRerunningId] = useState<string | null>(null);
+    
+    // Custom Modal State
+    const [modal, setModal] = useState<{
+        isOpen: boolean;
+        type: 'confirm' | 'alert';
+        title: string;
+        message: string;
+        onConfirm?: () => void;
+        confirmText?: string;
+        cancelText?: string;
+        isProcessing?: boolean;
+    }>({ isOpen: false, type: 'confirm', title: '', message: '' });
 
     useEffect(() => {
         loadData();
@@ -25,64 +37,86 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
         }).catch(() => setLoading(false));
     };
 
-    const handleDelete = async (id: string, name: string) => {
-        if (!confirm(`Supprimer l'historique de la campagne "${name}" ?`)) return;
-        setDeletingId(id);
-        try {
-            await api.deleteCampaign(id);
-            setCampaigns(prev => prev.filter(c => c.id !== id));
-        } catch (e) {
-            alert("Erreur lors de la suppression");
-        } finally {
-            setDeletingId(null);
-        }
+    const handleDelete = (id: string, name: string) => {
+        setModal({
+            isOpen: true,
+            type: 'confirm',
+            title: 'Suppression Historique',
+            message: `Voulez-vous vraiment supprimer l'historique de "${name}" ?`,
+            confirmText: 'Supprimer',
+            onConfirm: async () => {
+                setModal(prev => ({ ...prev, isProcessing: true }));
+                setDeletingId(id);
+                try {
+                    await api.deleteCampaign(id);
+                    setCampaigns(prev => prev.filter(c => c.id !== id));
+                    setModal(prev => ({ ...prev, isOpen: false }));
+                } catch (e) {
+                    alert("Erreur lors de la suppression");
+                    setModal(prev => ({ ...prev, isOpen: false }));
+                } finally {
+                    setDeletingId(null);
+                }
+            }
+        });
     };
 
-    const handleRerun = async (campaign: Campaign) => {
-        if (!confirm(`Relancer la campagne "${campaign.name}" avec les mêmes contacts et le même message ?`)) return;
-        
-        setRerunningId(campaign.id);
-        try {
-            // 1. Fetch old contacts from backend
-            console.log("Fetching contacts for campaign:", campaign.id);
-            const rawContacts = await api.getCampaignContacts(campaign.id);
-            
-            if (!rawContacts || rawContacts.length === 0) {
-                alert("Impossible de relancer : aucun contact trouvé pour cette campagne dans la base de données.");
-                setRerunningId(null);
-                return;
+    const handleRerun = (campaign: Campaign) => {
+        setModal({
+            isOpen: true,
+            type: 'confirm',
+            title: 'Relancer la Campagne',
+            message: `Créer une nouvelle campagne basée sur "${campaign.name}" avec les mêmes contacts ?`,
+            confirmText: 'Relancer',
+            onConfirm: async () => {
+                setModal(prev => ({ ...prev, isProcessing: true }));
+                setRerunningId(campaign.id);
+                try {
+                    // 1. Fetch old contacts from backend
+                    console.log("Fetching contacts for campaign:", campaign.id);
+                    const rawContacts = await api.getCampaignContacts(campaign.id);
+                    
+                    if (!rawContacts || rawContacts.length === 0) {
+                        setModal({
+                            isOpen: true,
+                            type: 'alert',
+                            title: 'Erreur',
+                            message: "Impossible de relancer : aucun contact trouvé pour cette campagne dans la base de données."
+                        });
+                        setRerunningId(null);
+                        return;
+                    }
+
+                    // 2. Format contacts
+                    const formattedContacts = rawContacts.map((c: any) => ({
+                        phone: c.phone,
+                        ...c.data
+                    }));
+
+                    // 3. Create new campaign
+                    await api.createCampaign({
+                        name: `${campaign.name} (Relance ${new Date().toLocaleDateString('fr-FR')})`,
+                        template: campaign.template,
+                        contacts: formattedContacts,
+                        mapping: null 
+                    });
+
+                    // 4. Redirect
+                    onNavigate(Tab.DASHBOARD);
+
+                } catch (e) {
+                    console.error("Rerun failed:", e);
+                    setModal({
+                        isOpen: true,
+                        type: 'alert',
+                        title: 'Erreur Technique',
+                        message: "Une erreur est survenue lors de la relance. Vérifiez la console."
+                    });
+                } finally {
+                    setRerunningId(null);
+                }
             }
-
-            console.log("Contacts found:", rawContacts.length);
-
-            // 2. Format contacts for createCampaign. 
-            // We ensure 'phone' is at top level for the backend check.
-            const formattedContacts = rawContacts.map((c: any) => ({
-                phone: c.phone,
-                ...c.data
-            }));
-
-            // 3. Create new campaign
-            // We explicitely pass mapping as NULL to trigger the 'direct key' logic in backend
-            console.log("Creating new campaign...");
-            await api.createCampaign({
-                name: `${campaign.name} (Relance ${new Date().toLocaleDateString('fr-FR')})`,
-                template: campaign.template,
-                contacts: formattedContacts,
-                mapping: null 
-            });
-
-            console.log("Campaign created. Navigating...");
-
-            // 4. Redirect to Dashboard
-            onNavigate(Tab.DASHBOARD);
-
-        } catch (e) {
-            console.error("Rerun failed:", e);
-            alert("Erreur technique lors de la relance. Vérifiez la console.");
-        } finally {
-            setRerunningId(null);
-        }
+        });
     };
 
     if (loading) return (
@@ -92,7 +126,7 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
     );
 
     return (
-        <div className="max-w-6xl mx-auto space-y-6 pb-20">
+        <div className="max-w-6xl mx-auto space-y-6 pb-20 relative">
             <div className="flex items-center gap-3 mb-6">
                 <div className="p-3 bg-indigo-100 text-indigo-700 rounded-xl">
                     <BarChart2 size={24} />
@@ -115,7 +149,7 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
                 )}
                 
                 {campaigns.map(c => {
-                    const total = c.totalContacts || 1; // Avoid division by zero
+                    const total = c.totalContacts || 1; 
                     const sent = c.sentCount || 0;
                     const failed = c.failedCount || 0;
                     const successRate = Math.round((sent / total) * 100);
@@ -193,6 +227,49 @@ export const History: React.FC<HistoryProps> = ({ onNavigate }) => {
                     );
                 })}
             </div>
+
+            {/* CUSTOM MODAL OVERLAY */}
+            {modal.isOpen && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden scale-100 animate-in zoom-in-95 duration-200 border border-slate-100">
+                        <div className="p-6">
+                            <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-4 mx-auto ${modal.type === 'alert' ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                                {modal.type === 'alert' ? <AlertTriangle size={24} /> : <RotateCcw size={24} />}
+                            </div>
+                            <h3 className="text-xl font-bold text-center text-slate-900 mb-2">{modal.title}</h3>
+                            <p className="text-center text-slate-500 text-sm leading-relaxed">{modal.message}</p>
+                        </div>
+                        {modal.type === 'confirm' ? (
+                            <div className="flex border-t border-slate-100">
+                                <button 
+                                    onClick={() => setModal({ ...modal, isOpen: false })}
+                                    className="flex-1 py-4 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                                    disabled={modal.isProcessing}
+                                >
+                                    {modal.cancelText || 'Annuler'}
+                                </button>
+                                <div className="w-px bg-slate-100"></div>
+                                <button 
+                                    onClick={modal.onConfirm}
+                                    className="flex-1 py-4 text-sm font-bold text-blue-600 hover:bg-blue-50 transition-colors flex justify-center items-center gap-2"
+                                    disabled={modal.isProcessing}
+                                >
+                                    {modal.isProcessing ? <Loader2 className="animate-spin" size={16}/> : (modal.confirmText || 'Confirmer')}
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="border-t border-slate-100 p-3">
+                                <button 
+                                    onClick={() => setModal({ ...modal, isOpen: false })}
+                                    className="w-full py-3 text-sm font-bold bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-colors"
+                                >
+                                    OK
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

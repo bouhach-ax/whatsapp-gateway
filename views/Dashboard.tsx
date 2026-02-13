@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Play, Pause, Activity, Send, AlertTriangle, 
   Smartphone, Terminal, CheckCircle2, ShieldCheck, Flame, 
-  PauseCircle, Database, Layers, Square, Hourglass, WifiOff, HelpCircle
+  PauseCircle, Database, Layers, Square, Hourglass, WifiOff, HelpCircle, Loader2
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { WorkerLog, Campaign } from '../types';
@@ -19,6 +19,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
   const [workerStatus, setWorkerStatus] = useState<'idle'|'running'|'paused'>('idle');
   const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 250 });
   const [stopping, setStopping] = useState(false);
+  
+  // Modal State
+  const [showStopModal, setShowStopModal] = useState(false);
 
   // Poll for REAL updates from Backend
   useEffect(() => {
@@ -54,17 +57,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
     await api.toggleCampaign();
   };
 
-  const stopCampaign = async () => {
-      if (confirm("ATTENTION : Cela va arrêter DÉFINITIVEMENT la campagne en cours. Elle sera marquée comme terminée. Continuer ?")) {
-          setStopping(true);
-          try {
-            await api.stopCampaign();
-            // Force reload to clear state cleanly
-            setTimeout(() => window.location.reload(), 1000);
-          } catch (e) {
-            alert("Erreur lors de l'arrêt. Le serveur est peut-être injoignable.");
-            setStopping(false);
-          }
+  const handleStopClick = () => {
+      setShowStopModal(true);
+  };
+
+  const confirmStop = async () => {
+      setStopping(true);
+      setShowStopModal(false);
+      try {
+        await api.stopCampaign();
+        // Force reload to clear state cleanly
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (e) {
+        alert("Erreur lors de l'arrêt. Le serveur est peut-être injoignable.");
+        setStopping(false);
       }
   };
 
@@ -120,7 +126,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
   ];
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6 pb-20 relative">
       
       {/* 1. TOP HEADER: STATUS & CONTROL */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
@@ -214,12 +220,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             {/* STOP BUTTON */}
             <div className="flex flex-col items-center">
                 <button 
-                    onClick={stopCampaign}
+                    onClick={handleStopClick}
                     disabled={stopping}
-                    title="Arrêt d'urgence définitif (Marquer comme terminé)"
+                    title="Arrêt d'urgence définitif"
                     className="bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 hover:border-red-200 p-4 rounded-xl transition-colors disabled:opacity-50"
                 >
-                    {stopping ? <div className="animate-spin h-6 w-6 border-2 border-red-500 border-t-transparent rounded-full"/> : <Square size={24} fill="currentColor" />}
+                    {stopping ? <Loader2 className="animate-spin" size={24}/> : <Square size={24} fill="currentColor" />}
                 </button>
                 <span className="text-[10px] text-slate-400 mt-1 uppercase font-semibold">Stop</span>
             </div>
@@ -394,6 +400,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
 
         </div>
       </div>
+
+      {/* STOP CONFIRM MODAL */}
+      {showStopModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-red-100">
+                  <div className="p-6">
+                      <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4 mx-auto text-red-600">
+                          <Square size={24} fill="currentColor" />
+                      </div>
+                      <h3 className="text-xl font-bold text-center text-slate-900 mb-2">Arrêt d'Urgence</h3>
+                      <p className="text-center text-slate-500 text-sm leading-relaxed">
+                          Voulez-vous vraiment arrêter définitivement cette campagne ? Elle sera marquée comme "Terminée".
+                      </p>
+                  </div>
+                  <div className="flex border-t border-slate-100">
+                      <button 
+                          onClick={() => setShowStopModal(false)}
+                          className="flex-1 py-4 text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                      >
+                          Annuler
+                      </button>
+                      <div className="w-px bg-slate-100"></div>
+                      <button 
+                          onClick={confirmStop}
+                          className="flex-1 py-4 text-sm font-bold text-red-600 hover:bg-red-50 transition-colors"
+                      >
+                          Arrêter Tout
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
     </div>
   );
 };
