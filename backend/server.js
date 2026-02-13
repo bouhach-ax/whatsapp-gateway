@@ -369,10 +369,14 @@ async function connectToWhatsApp() {
         }
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+            // IMPORTANT: If connection failure (401/403/515), we might want to force reconnect, 
+            // but if it is a Loop, we rely on the manual reset.
+            console.log('Connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect);
+            
             if (!shouldReconnect) {
                 connectionStatus = 'disconnected';
                 qrCodeData = null;
-                await supabase.from('baileys_auth').delete().neq('key', 'keep_safe');
+                // DO NOT DELETE AUTH HERE AUTOMATICALLY - IT CAUSES LOOPS
             } else {
                 await delay(5000);
                 connectToWhatsApp();
@@ -401,6 +405,31 @@ fastify.post('/instance/init', async () => {
 fastify.post('/instance/logout', async () => {
     if (sock) await sock.logout();
     return { message: 'Logged out' };
+});
+
+// NEW: HARD RESET ROUTE (Fix for Stuck Sessions)
+fastify.post('/instance/reset', async () => {
+    console.log("HARD RESET: Wiping session data from Supabase...");
+    
+    // 1. Force close socket if exists
+    if (sock) {
+        try { sock.end(undefined); } catch(e) {}
+        sock = null;
+    }
+    
+    // 2. Wipe DB
+    const { error } = await supabase.from('baileys_auth').delete().neq('key', 'keep_safe');
+    
+    // 3. Reset internal state
+    connectionStatus = 'disconnected';
+    qrCodeData = null;
+    workerStatus = 'idle';
+    
+    // 4. Restart Logic (Clean slate)
+    await delay(2000);
+    connectToWhatsApp();
+
+    return { success: true, error };
 });
 
 fastify.post('/campaigns', async (req) => {

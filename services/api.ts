@@ -104,6 +104,17 @@ export const api = {
         mockInstance.status = 'disconnected';
     }
   },
+  
+  // NEW: Hard Reset
+  async resetSession(): Promise<void> {
+      try {
+          const res = await fetch(`${API_URL}/instance/reset`, { method: 'POST' });
+          if (!res.ok) throw new Error("Reset failed");
+      } catch (e) {
+          console.error("Reset local not supported fully");
+          mockInstance.status = 'disconnected';
+      }
+  },
 
   // --- LISTS MANAGEMENT ---
 

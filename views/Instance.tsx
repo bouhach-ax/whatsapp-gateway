@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Smartphone, RefreshCw, Wifi, WifiOff, Battery, ShieldCheck, LogOut, AlertCircle } from 'lucide-react';
+import { Smartphone, RefreshCw, Wifi, WifiOff, Battery, ShieldCheck, LogOut, AlertCircle, Trash2 } from 'lucide-react';
 import { InstanceState } from '../types';
 import { api } from '../services/api';
 
@@ -57,6 +57,22 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
     } finally {
         setLoading(false);
     }
+  };
+
+  const handleHardReset = async () => {
+      if (confirm("ATTENTION : Cela va effacer toutes les clés de session de la base de données. À utiliser si le scan QR ne marche pas. Continuer ?")) {
+          setLoading(true);
+          try {
+              await api.resetSession();
+              alert("Session nettoyée. Veuillez attendre 5 secondes puis cliquer sur 'Connecter'.");
+              setQrCode(null);
+              setInstance(prev => ({ ...prev, status: 'disconnected' }));
+          } catch (e) {
+              alert("Erreur reset");
+          } finally {
+              setLoading(false);
+          }
+      }
   };
 
   return (
@@ -162,16 +178,27 @@ export const Instance: React.FC<InstanceProps> = ({ instance, setInstance }) => 
                   : 'Start the handshake to generate a secure QR code from the backend.'}
               </p>
 
-              {instance.status === 'disconnected' && (
+              <div className="flex flex-col gap-3 w-full max-w-sm">
+                {instance.status === 'disconnected' && (
+                    <button 
+                    onClick={handleReconnect}
+                    disabled={loading}
+                    className="bg-emerald-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-emerald-700 shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 transition-all hover:-translate-y-0.5"
+                    >
+                    {loading ? <RefreshCw className="animate-spin" /> : <Wifi />}
+                    Connect to Server
+                    </button>
+                )}
+
                 <button 
-                  onClick={handleReconnect}
+                  onClick={handleHardReset}
                   disabled={loading}
-                  className="bg-emerald-600 text-white px-8 py-3 rounded-lg font-semibold hover:bg-emerald-700 shadow-lg shadow-emerald-200 flex items-center gap-2 transition-all hover:-translate-y-0.5"
+                  className="bg-white border border-red-200 text-red-600 px-8 py-3 rounded-lg font-semibold hover:bg-red-50 flex items-center justify-center gap-2 transition-all text-sm"
                 >
-                   {loading ? <RefreshCw className="animate-spin" /> : <Wifi />}
-                   Connect to Server
+                   <Trash2 size={16} />
+                   Réinitialisation Forcée (Session Corrompue)
                 </button>
-              )}
+              </div>
             </div>
           )}
         </div>
