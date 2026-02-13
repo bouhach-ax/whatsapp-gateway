@@ -17,9 +17,10 @@ export interface Campaign {
   totalContacts: number;
   sentCount: number;
   failedCount: number;
+  pendingCount?: number; // Added for pipeline visualization
   replyCount: number;
-  created_at: string;   // Changed from createdAt to match Supabase
-  completed_at?: string; // Changed from completedAt to match Supabase
+  created_at: string;
+  completed_at?: string;
 }
 
 export interface WorkerLog {

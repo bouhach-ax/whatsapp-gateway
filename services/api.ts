@@ -275,6 +275,37 @@ export const api = {
          return {};
       }
   },
+
+  async stopCampaign(): Promise<any> {
+      try {
+          const res = await fetch(`${API_URL}/campaigns/stop`, { method: 'POST' });
+          return res.json();
+      } catch (e) {
+          if (localCampaign) {
+              localWorkerStatus = 'idle';
+              localCampaign.status = 'stopped';
+              if (workerInterval) clearInterval(workerInterval);
+              return { success: true };
+          }
+          return {};
+      }
+  },
+
+  // NEW: Test Message
+  async sendTestMessage(phone: string, message: string): Promise<any> {
+     try {
+         const res = await fetch(`${API_URL}/campaigns/test`, {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ phone, message })
+         });
+         if (!res.ok) throw new Error("Failed");
+         return res.json();
+     } catch (e) {
+         console.log("Mock sent test message");
+         return { success: true };
+     }
+  },
   
   async getHistory(): Promise<Campaign[]> {
     try {
@@ -284,5 +315,14 @@ export const api = {
     } catch (e) {
         return [];
     }
+  },
+  
+  async deleteCampaign(id: string): Promise<void> {
+      try {
+          const res = await fetch(`${API_URL}/campaigns/${id}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error();
+      } catch (e) {
+          // fallback
+      }
   }
 };

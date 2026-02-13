@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileSpreadsheet, ArrowRight, Keyboard, Save, PlayCircle, AlertCircle, CheckCircle2, Loader2, Plus, Trash2, Edit2, X, ChevronLeft, ChevronRight, Users, Download, Cloud } from 'lucide-react';
+import { FileSpreadsheet, ArrowRight, Keyboard, Save, PlayCircle, AlertCircle, CheckCircle2, Loader2, Plus, Trash2, Edit2, X, ChevronLeft, ChevronRight, Users, Download, Cloud, Shuffle, Wand2, Phone } from 'lucide-react';
 import Papa from 'papaparse';
 import { Campaign } from '../types';
 import { api } from '../services/api';
@@ -40,7 +40,16 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
   // Launch State
   const [isLaunching, setIsLaunching] = useState(false);
   const [campaignName, setCampaignName] = useState("Campagne " + new Date().toLocaleDateString());
-  const [template, setTemplate] = useState("{Bonjour|Salam} Dr {{Nom}}, expert en {{Spécialité}} à {{Ville}}.\n\nVoici le lien de votre dossier : {{URL}}");
+  const [template, setTemplate] = useState("{Bonjour|Salam|Bonsoir} Dr {{Nom}}, expert en {{Spécialité}} à {{Ville}}.\n\nVoici le lien de votre dossier : {{URL}}");
+  
+  // Preview State
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [refreshTrigger, setRefreshTrigger] = useState(0); // Force re-render of randoms
+
+  // Test Message State
+  const [testPhone, setTestPhone] = useState("");
+  const [isSendingTest, setIsSendingTest] = useState(false);
+  const [showTestInput, setShowTestInput] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -199,23 +208,46 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
 
   // --- TEMPLATE HELPERS ---
 
-  const getPreview = () => {
-    if (csvData.length === 0) return template;
+  const insertSpintax = (start: string, mid: string, end: string) => {
+      setTemplate(prev => prev + `{${start}|${mid}|${end}}`);
+  };
+
+  const getPreview = (): { text: string; row: any | null } => {
+    if (csvData.length === 0) return { text: template, row: null };
     let text = template;
-    const firstRow = csvData[0];
+    
+    // Use random row if preview index is -1 (shuffle mode), else use specific index
+    const rowIndex = previewIndex >= 0 && previewIndex < csvData.length ? previewIndex : Math.floor(Math.random() * csvData.length);
+    const row = csvData[rowIndex];
 
     Object.entries(mapping).forEach(([header, variable]) => {
       if (variable !== 'ignore' && variable !== 'phone') {
-         const regex = new RegExp(`{{${variable}}}`, 'g');
-         text = text.replace(regex, firstRow[header] || `[${header}]`);
+         const regex = new RegExp(`{{${variable}}}`, 'gi'); // Case insensitive
+         text = text.replace(regex, row[header] || `[${header}]`);
       }
     });
 
+    // Handle Spintax
     text = text.replace(/\{([^{}]+)\}/g, (match, group) => {
       const options = group.split('|');
       return options[Math.floor(Math.random() * options.length)];
     });
-    return text;
+    return { text, row };
+  };
+
+  const handleSendTest = async () => {
+      if (!testPhone) return alert("Entrez un numéro");
+      const currentPreview = getPreview();
+      setIsSendingTest(true);
+      try {
+          await api.sendTestMessage(testPhone, currentPreview.text);
+          alert("Message envoyé ! Vérifiez votre téléphone.");
+          setShowTestInput(false);
+      } catch (e) {
+          alert("Erreur envoi test");
+      } finally {
+          setIsSendingTest(false);
+      }
   };
 
   const handleLaunch = async () => {
@@ -255,6 +287,8 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
   // Pagination Logic
   const totalPages = Math.ceil(csvData.length / rowsPerPage);
   const paginatedData = csvData.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
+
+  const currentPreview = getPreview();
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-20">
@@ -576,7 +610,6 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
             <div className="p-8 border-r border-slate-200 flex flex-col bg-white">
                <div className="mb-6">
                   <label className="block text-sm font-bold text-slate-800 mb-2 uppercase tracking-wide">Nom de la Campagne</label>
-                  {/* FORCE WHITE BACKGROUND AND DARK TEXT */}
                   <input 
                     type="text" 
                     value={campaignName} 
@@ -585,22 +618,40 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                   />
                </div>
 
-               <div className="flex justify-between items-center mb-2">
-                  <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wide">Message</h3>
-                  <div className="flex gap-2 flex-wrap">
+               {/* SPINTAX TOOLBAR */}
+               <div className="mb-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="font-bold text-slate-800 uppercase text-sm tracking-wide flex items-center gap-2">
+                        <Wand2 size={16} className="text-purple-600"/> 
+                        Variables & Variations
+                    </h3>
+                  </div>
+                  
+                  <div className="flex gap-2 flex-wrap mb-3">
                     {Object.entries(mapping).filter(k => k[1] !== 'ignore' && k[1] !== 'phone').map(([k, v]) => (
-                        <button key={k} onClick={() => setTemplate(prev => prev + ` {{${v}}}`)} className="text-xs bg-slate-100 border border-slate-300 text-slate-700 px-2 py-1 rounded hover:bg-slate-200 transition-colors font-medium">
+                        <button key={k} onClick={() => setTemplate(prev => prev + ` {{${v}}}`)} className="text-xs bg-blue-50 border border-blue-200 text-blue-700 px-2 py-1.5 rounded hover:bg-blue-100 transition-colors font-medium">
                             {`{{${v}}}`}
                         </button>
                     ))}
                   </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                      <button onClick={() => insertSpintax('Bonjour', 'Salam', 'Bonsoir')} className="text-xs bg-purple-50 border border-purple-200 text-purple-700 px-2 py-1.5 rounded hover:bg-purple-100 transition-colors font-medium">
+                         {`{Bonjour|Salam...}`}
+                      </button>
+                       <button onClick={() => insertSpintax('Cordialement', 'Bien à vous', 'Merci')} className="text-xs bg-purple-50 border border-purple-200 text-purple-700 px-2 py-1.5 rounded hover:bg-purple-100 transition-colors font-medium">
+                         {`{Cordialement...}`}
+                      </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-2">
+                      Astuce Anti-Ban : Utilisez les variations {'{A|B}'} pour que chaque message soit unique.
+                  </p>
                </div>
                
-               {/* FORCE WHITE BACKGROUND AND DARK TEXT */}
                <textarea 
                 value={template} 
                 onChange={(e) => setTemplate(e.target.value)} 
-                className="w-full flex-1 min-h-[250px] p-4 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 outline-none shadow-inner resize-none" 
+                className="w-full flex-1 min-h-[200px] p-4 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 outline-none shadow-inner resize-none" 
                 placeholder="Bonjour Dr {{Nom}}..." 
                />
                
@@ -611,7 +662,16 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
             </div>
 
             <div className="p-8 bg-slate-100 flex flex-col items-center justify-center">
-               <h3 className="font-bold text-slate-400 mb-6 text-sm uppercase tracking-widest">Aperçu WhatsApp</h3>
+               <div className="flex justify-between w-full max-w-[320px] mb-4">
+                   <h3 className="font-bold text-slate-400 text-sm uppercase tracking-widest">Aperçu WhatsApp</h3>
+                   <button 
+                    onClick={() => { setPreviewIndex(-1); setRefreshTrigger(r => r + 1); }} 
+                    className="flex items-center gap-1 text-xs font-bold text-purple-600 bg-purple-100 px-3 py-1 rounded-full hover:bg-purple-200 transition-colors"
+                   >
+                       <Shuffle size={12} />
+                       Variante Aléatoire
+                   </button>
+               </div>
                
                {/* IMPROVED WHATSAPP PREVIEW */}
                <div className="w-[320px] bg-[#ECE5DD] rounded-[30px] overflow-hidden shadow-2xl border-8 border-slate-800 relative flex flex-col h-[550px]">
@@ -631,7 +691,7 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                       </div>
                       <div className="flex-1 text-white">
                           <div className="font-bold text-sm truncate w-32">
-                              Dr {csvData[0] ? getMappedValue(csvData[0], 'Nom') || 'Alami' : 'Alami'}
+                              {currentPreview.row ? (getMappedValue(currentPreview.row, 'Nom') || 'Dr Alami') : 'Dr Alami'}
                           </div>
                           <div className="text-[10px] opacity-80">en ligne</div>
                       </div>
@@ -641,7 +701,7 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                   <div className="flex-1 p-3 bg-[url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png')] opacity-90 flex flex-col justify-end">
                       {/* Message Bubble (Sent) */}
                       <div className="self-end bg-[#E7FFDB] p-2 pl-3 pr-2 rounded-lg rounded-tr-none shadow-sm max-w-[85%] text-sm text-[#111b21] leading-snug relative mb-2">
-                          <p className="whitespace-pre-wrap mb-1">{getPreview()}</p>
+                          <p className="whitespace-pre-wrap mb-1">{currentPreview.text}</p>
                           <div className="flex justify-end items-center gap-1">
                               <span className="text-[10px] text-[#667781]">12:31</span>
                               <CheckCircle2 size={12} className="text-[#53bdeb]" /> {/* Blue ticks */}
@@ -661,8 +721,39 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
                        </div>
                   </div>
                </div>
+               
+               <p className="text-center text-xs text-slate-400 mt-4 max-w-xs">
+                   Ce message inclura également des caractères invisibles aléatoires pour éviter la détection de Hash par Meta.
+               </p>
 
-               <div className="w-full max-w-sm mt-8 space-y-3">
+               {/* TEST MESSAGE SECTION */}
+               <div className="w-full max-w-sm mt-4">
+                  {showTestInput ? (
+                      <div className="bg-white p-3 rounded-lg shadow-lg border border-slate-200 animate-in fade-in slide-in-from-bottom-2">
+                          <label className="text-xs font-bold text-slate-600 mb-1 block">Votre numéro de test :</label>
+                          <div className="flex gap-2">
+                              <input 
+                                autoFocus
+                                type="text" 
+                                placeholder="2126..." 
+                                className="flex-1 border rounded p-2 text-sm"
+                                value={testPhone}
+                                onChange={e => setTestPhone(e.target.value)}
+                              />
+                              <button onClick={handleSendTest} disabled={isSendingTest} className="bg-slate-800 text-white px-3 rounded text-xs font-bold disabled:opacity-50">
+                                  {isSendingTest ? <Loader2 size={14} className="animate-spin" /> : 'Envoyer'}
+                              </button>
+                          </div>
+                          <button onClick={() => setShowTestInput(false)} className="text-[10px] text-slate-400 mt-2 underline text-center w-full">Annuler</button>
+                      </div>
+                  ) : (
+                      <button onClick={() => setShowTestInput(true)} className="w-full py-2 bg-white border border-slate-300 rounded-lg text-slate-600 text-xs font-bold hover:bg-slate-50 flex items-center justify-center gap-2">
+                          <Phone size={14} /> M'envoyer un test maintenant
+                      </button>
+                  )}
+               </div>
+
+               <div className="w-full max-w-sm mt-4 space-y-3">
                  <div className="flex gap-3">
                     <button onClick={() => setStep(3)} className="flex-1 py-3 border border-slate-300 bg-white rounded-lg text-slate-700 font-medium hover:bg-slate-50">Retour</button>
                     <button onClick={handleLaunch} disabled={isLaunching} className="flex-1 py-3 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 flex items-center justify-center gap-2 shadow-lg shadow-emerald-200 disabled:opacity-70 disabled:cursor-not-allowed">

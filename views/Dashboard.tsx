@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Play, Pause, OctagonX, Activity, Send, MessageSquare, AlertTriangle, 
-  Smartphone, Coffee, Terminal, CheckCircle2, XCircle, Clock
+  Play, Pause, Activity, Send, AlertTriangle, 
+  Smartphone, Terminal, CheckCircle2, ShieldCheck, Flame, 
+  PauseCircle, Database, Layers, Square, Hourglass, WifiOff
 } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { StatCard } from '../components/StatCard';
+import { ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { WorkerLog, Campaign } from '../types';
 import { api } from '../services/api';
 
@@ -14,55 +14,34 @@ interface DashboardProps {
     instanceStatus: string;
 }
 
-const MOCK_CHART_DATA = [
-  { time: '10:00', sent: 0, failed: 0 },
-  { time: '11:00', sent: 0, failed: 0 },
-  { time: '12:00', sent: 0, failed: 0 },
-  { time: '13:00', sent: 0, failed: 0 },
-  { time: '14:00', sent: 0, failed: 0 },
-  { time: '15:00', sent: 0, failed: 0 },
-];
-
 export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaignUpdate, instanceStatus }) => {
   const [logs, setLogs] = useState<WorkerLog[]>([]);
-  const [chartData, setChartData] = useState(MOCK_CHART_DATA);
   const [workerStatus, setWorkerStatus] = useState<'idle'|'running'|'paused'>('idle');
+  const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 250 });
 
   // Poll for REAL updates from Backend
   useEffect(() => {
-    if (instanceStatus !== 'connected') return;
-
+    // Slower poll when disconnected to save resources, but enough to catch reconnect
+    const intervalTime = instanceStatus === 'connected' ? 4000 : 8000;
+    
     const interval = setInterval(async () => {
         try {
             const data = await api.getCurrentCampaignStatus();
             
-            if (data && data.active) {
-                // Update parent state with real progress
-                onCampaignUpdate(data.campaign);
-                
-                // Update local logs
-                if (data.logs) {
-                    setLogs(data.logs);
-                }
-                
-                setWorkerStatus(data.workerStatus);
+            // Always update global daily stats if available
+            if (data.dailyCap) {
+                setDailyStats({ sent: data.dailySent || 0, cap: data.dailyCap });
+            }
 
-                // Update chart (simplified)
-                setChartData(curr => {
-                    const newData = [...curr];
-                    if (newData.length > 0) {
-                        const last = { ...newData[newData.length - 1] };
-                        last.sent = data.campaign.sentCount;
-                        last.failed = data.campaign.failedCount;
-                        newData[newData.length - 1] = last;
-                    }
-                    return newData;
-                });
+            if (data && data.active) {
+                onCampaignUpdate(data.campaign);
+                if (data.logs) setLogs(data.logs);
+                setWorkerStatus(data.workerStatus);
             }
         } catch (e) {
-            console.error("Failed to fetch campaign status", e);
+            console.error("Failed to fetch campaign status");
         }
-    }, 2000); // Poll every 2 seconds
+    }, intervalTime);
 
     return () => clearInterval(interval);
   }, [instanceStatus, onCampaignUpdate]);
@@ -71,168 +50,330 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
     await api.toggleCampaign();
   };
 
+  const stopCampaign = async () => {
+      if (confirm("ATTENTION : Cela va arrêter définitivement la campagne en cours. Vous ne pourrez pas la reprendre. Continuer ?")) {
+          await api.stopCampaign();
+          // Force refresh immediately
+          const data = await api.getCurrentCampaignStatus();
+          if (data && data.active) onCampaignUpdate(data.campaign);
+          else window.location.reload();
+      }
+  };
+
+  // --- RENDERING ---
+
   if (!activeCampaign) {
       return (
-          <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-6">
-              <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center">
-                  <Send size={40} className="text-slate-400" />
+          <div className="flex flex-col items-center justify-center h-[70vh] text-center space-y-8 animate-in fade-in duration-700">
+              <div className="relative">
+                  <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-20 animate-pulse"></div>
+                  <div className="w-24 h-24 bg-slate-900 rounded-2xl flex items-center justify-center relative z-10 shadow-xl border border-slate-700">
+                      <Send size={48} className="text-blue-500" />
+                  </div>
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-slate-900">Campaign Cockpit Idle</h2>
-                <p className="text-slate-500 max-w-md mt-2">No active campaign detected. Go to the Campaign Builder to verify your list and launch your first campaign.</p>
+                <h2 className="text-3xl font-bold text-slate-900">Cockpit Ready</h2>
+                <p className="text-slate-500 max-w-md mt-4 text-lg">Système en attente. Configurez une nouvelle campagne pour activer les modules de supervision.</p>
+                <div className="mt-8 grid grid-cols-2 gap-4 max-w-sm mx-auto">
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center">
+                        <span className="text-sm text-slate-400 uppercase font-bold">Daily Count</span>
+                        <span className="text-2xl font-mono font-bold text-slate-700">{dailyStats.sent}</span>
+                    </div>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center">
+                        <span className="text-sm text-slate-400 uppercase font-bold">Daily Cap</span>
+                        <span className="text-2xl font-mono font-bold text-slate-700">{dailyStats.cap}</span>
+                    </div>
+                </div>
               </div>
           </div>
       );
   }
 
-  // Helper calculation for progress bar
+  // Visual Calcs
   const total = activeCampaign.totalContacts || 1;
   const processed = (activeCampaign.sentCount || 0) + (activeCampaign.failedCount || 0);
+  const pending = activeCampaign.pendingCount || (total - processed);
   const progressPercent = Math.min(100, Math.round((processed / total) * 100));
+  
+  // Daily Warmup Gauge Data (Safe Defaults)
+  const currentSent = dailyStats.sent || 0;
+  const currentCap = dailyStats.cap || 250;
+  const dailyPercent = Math.min(100, Math.round((currentSent / currentCap) * 100));
+  const gaugeColor = dailyPercent > 90 ? '#ef4444' : dailyPercent > 70 ? '#f59e0b' : '#10b981';
+  
+  // Logic to determine states
+  const isDailyLimitReached = currentSent >= currentCap;
+  const isStandby = isDailyLimitReached && workerStatus === 'running';
+  const isWaitingForConnection = workerStatus === 'running' && instanceStatus !== 'connected';
+  
+  const gaugeData = [
+      { name: 'Sent', value: currentSent, color: gaugeColor },
+      { name: 'Remaining', value: Math.max(0, currentCap - currentSent), color: '#e2e8f0' }
+  ];
 
   return (
     <div className="space-y-6 pb-20">
-      {/* Header Actions */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-4 sticky top-0 z-10">
-        <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${activeCampaign.status === 'running' ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                <Activity size={24} className={activeCampaign.status === 'running' ? 'animate-pulse' : ''} />
+      
+      {/* 1. TOP HEADER: STATUS & CONTROL */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
+        {/* Active Pulse Background */}
+        {workerStatus === 'running' && !isStandby && !isWaitingForConnection && (
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent animate-shimmer"></div>
+        )}
+        {isStandby && (
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-shimmer"></div>
+        )}
+        {isWaitingForConnection && (
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent animate-pulse"></div>
+        )}
+
+        <div className="flex items-center gap-6 z-10">
+            <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner ${
+                isStandby ? 'bg-amber-50 text-amber-500' :
+                isWaitingForConnection ? 'bg-red-50 text-red-500' :
+                workerStatus === 'running' ? 'bg-emerald-50 text-emerald-600' : 
+                'bg-slate-100 text-slate-400'
+            }`}>
+                {isStandby ? (
+                    <Hourglass size={32} className="animate-pulse" />
+                ) : isWaitingForConnection ? (
+                    <WifiOff size={32} className="animate-pulse" />
+                ) : (
+                    <Activity size={32} className={workerStatus === 'running' ? 'animate-pulse' : ''} />
+                )}
             </div>
             <div>
-                <h1 className="text-xl font-bold text-slate-900">{activeCampaign.name}</h1>
-                <div className="flex items-center gap-2">
-                    <span className={`inline-block w-2 h-2 rounded-full ${activeCampaign.status === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}></span>
-                    <span className="text-slate-500 text-xs font-medium uppercase tracking-wide">
-                        Status: {activeCampaign.status}
+                <div className="flex items-center gap-2 mb-1">
+                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight">{activeCampaign.name}</h1>
+                    <span className="bg-slate-100 text-slate-500 text-[10px] px-2 py-0.5 rounded border border-slate-200 font-mono">ID: {activeCampaign.id.split('-')[0]}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                    <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border ${
+                        isStandby ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                        isWaitingForConnection ? 'bg-red-100 text-red-700 border-red-200' :
+                        workerStatus === 'running' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
+                        workerStatus === 'paused' ? 'bg-amber-100 text-amber-700 border-amber-200' :
+                        'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}>
+                        <div className={`w-2 h-2 rounded-full ${
+                            isStandby ? 'bg-amber-500 animate-pulse' :
+                            isWaitingForConnection ? 'bg-red-500 animate-pulse' :
+                            workerStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                        }`}></div>
+                        {isStandby ? 'STANDBY (LIMIT)' : isWaitingForConnection ? 'WAITING NETWORK' : workerStatus}
                     </span>
                     <span className="text-slate-300">|</span>
-                    <span className="text-slate-500 text-xs">ID: {activeCampaign.id}</span>
+                    <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <ShieldCheck size={12} className="text-blue-500" /> Mode Paranoïaque Actif
+                    </span>
                 </div>
             </div>
         </div>
         
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={toggleCampaign}
-            disabled={instanceStatus !== 'connected' && activeCampaign.status !== 'running'}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-bold transition-all ${
-              activeCampaign.status === 'running' 
-                ? 'bg-amber-100 text-amber-700 hover:bg-amber-200 border border-amber-200' 
-                : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-lg shadow-emerald-200'
-            } disabled:opacity-50 disabled:cursor-not-allowed`}
-          >
-            {activeCampaign.status === 'running' ? <Pause size={18} /> : <Play size={18} />}
-            {activeCampaign.status === 'running' ? 'Pause Campaign' : 'Resume Campaign'}
-          </button>
+        <div className="flex items-center gap-2 z-10">
+            {/* Control Button */}
+            {isStandby ? (
+                 <div className="px-6 py-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 font-bold text-sm flex items-center gap-2">
+                     <Hourglass size={20} />
+                     En attente de demain...
+                 </div>
+            ) : isWaitingForConnection ? (
+                 <div className="px-6 py-4 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold text-sm flex items-center gap-2">
+                     <WifiOff size={20} />
+                     En attente de connexion...
+                 </div>
+            ) : (
+                <button 
+                    onClick={toggleCampaign}
+                    disabled={instanceStatus !== 'connected'}
+                    className={`flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 active:scale-95 ${
+                    workerStatus === 'running'
+                        ? 'bg-white text-amber-600 border-2 border-amber-100 hover:border-amber-200' 
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                    {workerStatus === 'running' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
+                    {workerStatus === 'running' ? 'PAUSE PROD' : 'START PROD'}
+                </button>
+            )}
+            
+            {/* STOP BUTTON */}
+            <button 
+                onClick={stopCampaign}
+                title="Arrêt d'urgence définitif"
+                className="bg-slate-100 hover:bg-red-50 text-slate-400 hover:text-red-600 border border-slate-200 hover:border-red-200 p-4 rounded-xl transition-colors"
+            >
+                <Square size={24} fill="currentColor" />
+            </button>
         </div>
-      </div>
-
-        {instanceStatus !== 'connected' && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-3 animate-pulse">
-                <AlertTriangle size={20} />
-                <span className="font-bold">CRITICAL: Instance Disconnected.</span>
-                <span className="text-sm">The campaign worker is paused. Reconnect to resume.</span>
-            </div>
-        )}
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard 
-            title="Messages Sent" 
-            value={(activeCampaign.sentCount || 0).toLocaleString()} 
-            icon={Send} 
-            color="blue" 
-            subValue={`${progressPercent}% Complete`} 
-        />
-        <StatCard 
-            title="Failed / Invalid" 
-            value={activeCampaign.failedCount || 0} 
-            icon={AlertTriangle} 
-            color="red" 
-            subValue="Non-WhatsApp Numbers" 
-        />
-        <StatCard 
-            title="Queue Status" 
-            value={workerStatus === 'running' ? 'Processing' : 'Paused'} 
-            icon={Activity} 
-            color={workerStatus === 'running' ? 'green' : 'yellow'} 
-            subValue="Real-time worker" 
-        />
-        <StatCard 
-            title="Target List" 
-            value={activeCampaign.totalContacts || 0} 
-            icon={Clock} 
-            color="slate" 
-            subValue={`${Math.max(0, (activeCampaign.totalContacts || 0) - processed)} remaining`} 
-        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
-        {/* Main Chart */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-          <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-4">Throughput (Messages/Hr)</h3>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                <Tooltip 
-                  cursor={{ fill: '#f8fafc' }}
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                />
-                <Bar dataKey="sent" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={50} />
-                <Bar dataKey="failed" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={50} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        {/* 2. LEFT COLUMN: VITAL SIGNS (Daily Cap & Queue) */}
+        <div className="lg:col-span-1 space-y-6">
+            {/* Daily Warmup Gauge */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+                    <Flame size={16} className={dailyPercent > 80 ? 'text-red-500' : 'text-slate-400'} />
+                    Daily Warm-up Cap
+                </h3>
+                <div className="flex items-center justify-center relative h-48">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                            <Pie
+                                data={gaugeData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={60}
+                                outerRadius={80}
+                                startAngle={180}
+                                endAngle={0}
+                                paddingAngle={5}
+                                dataKey="value"
+                                stroke="none"
+                            >
+                                {gaugeData.map((entry, index) => (
+                                    <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                            </Pie>
+                        </PieChart>
+                    </ResponsiveContainer>
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/3 text-center">
+                        <div className="text-3xl font-black text-slate-800">{currentSent}</div>
+                        <div className="text-xs text-slate-400 font-medium">sur {currentCap}</div>
+                    </div>
+                </div>
+                <div className="text-center mt-[-30px]">
+                    <p className="text-xs text-slate-500 font-medium">
+                        Risque Bannissement: 
+                        <span className={`ml-1 font-bold ${dailyPercent > 90 ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {dailyPercent > 90 ? 'CRITIQUE' : dailyPercent > 50 ? 'MODÉRÉ' : 'FAIBLE'}
+                        </span>
+                    </p>
+                </div>
+            </div>
+
+            {/* Queue Health */}
+            <div className="bg-slate-900 p-6 rounded-2xl shadow-lg text-white relative overflow-hidden">
+                <div className="absolute right-0 top-0 opacity-10"><Database size={120} /></div>
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Pipeline Status</h3>
+                
+                <div className="space-y-4 relative z-10">
+                    <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-500/20 rounded-lg text-blue-400"><Layers size={18} /></div>
+                            <div>
+                                <div className="text-xs text-slate-400">En attente</div>
+                                <div className="font-bold text-lg">{pending}</div>
+                            </div>
+                        </div>
+                        <div className="h-full w-1 bg-blue-500 rounded-full"></div>
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400"><CheckCircle2 size={18} /></div>
+                            <div>
+                                <div className="text-xs text-slate-400">Succès (24h)</div>
+                                <div className="font-bold text-lg">{activeCampaign.sentCount}</div>
+                            </div>
+                        </div>
+                        <div className="h-full w-1 bg-emerald-500 rounded-full"></div>
+                    </div>
+
+                    <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-red-500/20 rounded-lg text-red-400"><AlertTriangle size={18} /></div>
+                            <div>
+                                <div className="text-xs text-slate-400">Rejets / Invalides</div>
+                                <div className="font-bold text-lg">{activeCampaign.failedCount}</div>
+                            </div>
+                        </div>
+                        <div className="h-full w-1 bg-red-500 rounded-full"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        {/* Worker Live Status */}
-        <div className="bg-slate-900 rounded-xl border border-slate-800 shadow-lg p-0 overflow-hidden flex flex-col text-white">
-          <div className="p-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
-            <h3 className="font-mono text-sm text-emerald-400 flex items-center gap-2">
-              <Terminal size={16} />
-              SERVER_LOGS
-            </h3>
-            <div className="flex items-center gap-2">
-                 <span className={`w-2 h-2 rounded-full ${workerStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></span>
-                 <span className="text-xs font-bold text-slate-400">{workerStatus.toUpperCase()}</span>
+        {/* 3. RIGHT COLUMN: LIVE OPERATIONS (Terminal & Pipeline Viz) */}
+        <div className="lg:col-span-2 space-y-6">
+            
+            {/* Pipeline Visualization Bar */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-end mb-4">
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Flux de Traitement</h3>
+                    <span className="text-2xl font-black text-slate-900">{progressPercent}%</span>
+                </div>
+                <div className="w-full h-6 bg-slate-100 rounded-full overflow-hidden flex relative">
+                    {/* Processing Striped Pattern if Running */}
+                    {workerStatus === 'running' && !isStandby && (
+                        <div className="absolute inset-0 w-full h-full bg-[linear-gradient(45deg,rgba(255,255,255,.15)_25%,transparent_25%,transparent_50%,rgba(255,255,255,.15)_50%,rgba(255,255,255,.15)_75%,transparent_75%,transparent)] bg-[length:1rem_1rem] animate-[progress-bar-stripes_1s_linear_infinite] z-20 pointer-events-none opacity-30"></div>
+                    )}
+                    <div style={{ width: `${(activeCampaign.sentCount / total) * 100}%` }} className="bg-emerald-500 h-full transition-all duration-1000"></div>
+                    <div style={{ width: `${(activeCampaign.failedCount / total) * 100}%` }} className="bg-red-400 h-full transition-all duration-1000"></div>
+                </div>
+                <div className="flex justify-between mt-2 text-xs font-medium text-slate-400 font-mono">
+                    <span>Start</span>
+                    <span>Target: {total}</span>
+                </div>
             </div>
-          </div>
-          
-          {/* Current Action Visualizer - Simplified for Real Mode */}
-          <div className="p-6 flex flex-col items-center justify-center border-b border-slate-800 bg-slate-900 min-h-[100px]">
-             {workerStatus === 'running' ? (
-                <div className="flex flex-col items-center">
-                    <Smartphone size={32} className="text-emerald-400 mb-2 animate-pulse" />
-                    <p className="text-xs text-emerald-400 font-mono">PROCESSING QUEUE...</p>
-                </div>
-             ) : (
-                <div className="flex flex-col items-center">
-                    <Coffee size={32} className="text-slate-600 mb-2" />
-                    <p className="text-xs text-slate-500 font-mono">WORKER IDLE</p>
-                </div>
-             )}
-          </div>
 
-          {/* Scrolling Logs */}
-          <div className="flex-1 overflow-y-auto h-[200px] p-4 font-mono text-[10px] space-y-1 scrollbar-hide">
-            {logs.map((log) => (
-              <div key={log.id} className="flex gap-2 opacity-80 hover:opacity-100 transition-opacity">
-                <span className="text-slate-500">[{log.timestamp}]</span>
-                <span className={
-                  log.type === 'error' ? 'text-red-400' :
-                  log.type === 'success' ? 'text-emerald-400' :
-                  log.type === 'typing' ? 'text-amber-400' :
-                  'text-blue-300'
-                }>
-                  {log.message}
-                </span>
-              </div>
-            ))}
-          </div>
+            {/* Matrix Terminal */}
+            <div className="bg-black rounded-2xl border border-slate-800 shadow-2xl p-0 overflow-hidden flex flex-col h-[400px] font-mono relative">
+                {/* Header */}
+                <div className="bg-slate-900/80 p-3 border-b border-slate-800 flex justify-between items-center backdrop-blur-sm z-10">
+                    <div className="flex items-center gap-2">
+                        <Terminal size={14} className="text-emerald-500" />
+                        <span className="text-xs text-slate-300 font-bold">SMARTDOC_CORE_V2.1</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                        <div className="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/50"></div>
+                        <div className="w-2.5 h-2.5 rounded-full bg-amber-500/20 border border-amber-500/50"></div>
+                        <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/20 border border-emerald-500/50"></div>
+                    </div>
+                </div>
+
+                {/* Logs Area */}
+                <div className="flex-1 p-4 overflow-y-auto space-y-2 scrollbar-hide bg-black/90">
+                    {logs.length === 0 && (
+                        <div className="text-slate-600 text-xs italic opacity-50 text-center mt-20">Waiting for subprocess signal...</div>
+                    )}
+                    {logs.map((log) => (
+                        <div key={log.id} className="flex gap-3 text-xs animate-in fade-in slide-in-from-left-2 duration-300">
+                            <span className="text-slate-600 shrink-0">[{log.timestamp}]</span>
+                            <span className={`break-all font-medium ${
+                                log.type === 'error' ? 'text-red-500' :
+                                log.type === 'success' ? 'text-emerald-400 shadow-emerald-500/20 drop-shadow-sm' :
+                                log.type === 'warning' ? 'text-amber-400' :
+                                'text-blue-400'
+                            }`}>
+                                {log.type === 'success' && '➜ '}
+                                {log.message}
+                            </span>
+                        </div>
+                    ))}
+                    
+                    {/* Live Cursor */}
+                    {workerStatus === 'running' && !isStandby && !isWaitingForConnection && (
+                         <div className="text-emerald-500 text-xs animate-pulse mt-2">_ cursor active. processing queue...</div>
+                    )}
+                    {isStandby && (
+                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ standby mode. waiting for next cycle...</div>
+                    )}
+                    {isWaitingForConnection && (
+                         <div className="text-red-500 text-xs animate-pulse mt-2">_ connection lost. retrying socket handshake...</div>
+                    )}
+                </div>
+
+                {/* Status Footer */}
+                <div className="bg-slate-900 border-t border-slate-800 p-2 text-[10px] text-slate-500 flex justify-between">
+                    <span>MEM: 50MB</span>
+                    <span>LATENCY: 24ms</span>
+                    <span>UPTIME: 99.9%</span>
+                </div>
+            </div>
+
         </div>
       </div>
     </div>
