@@ -368,15 +368,33 @@ async function connectToWhatsApp() {
             connectionStatus = 'pairing';
         }
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-            // IMPORTANT: If connection failure (401/403/515), we might want to force reconnect, 
-            // but if it is a Loop, we rely on the manual reset.
+            const statusCode = (lastDisconnect.error instanceof Boom)?.output?.statusCode;
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401;
+            
             console.log('Connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect);
+
+            // CRITICAL FIX: IF 401 Unauthorized (Session Invalid), WIPE DATA AUTOMATICALLY
+            if (statusCode === 401 || statusCode === DisconnectReason.loggedOut) {
+                console.log("🛑 401 Unauthorized / Session Invalid. AUTO-WIPING DATA to allow re-pairing.");
+                
+                // 1. Wipe Supabase Auth
+                await supabase.from('baileys_auth').delete().neq('key', 'keep_safe');
+                
+                // 2. Reset Local State
+                sock = null;
+                qrCodeData = null;
+                connectionStatus = 'disconnected';
+                
+                // 3. Restart to generate new QR
+                await delay(3000);
+                connectToWhatsApp();
+                return;
+            }
             
             if (!shouldReconnect) {
                 connectionStatus = 'disconnected';
                 qrCodeData = null;
-                // DO NOT DELETE AUTH HERE AUTOMATICALLY - IT CAUSES LOOPS
+                // DO NOT DELETE AUTH HERE AUTOMATICALLY - IT CAUSES LOOPS unless it is 401
             } else {
                 await delay(5000);
                 connectToWhatsApp();
