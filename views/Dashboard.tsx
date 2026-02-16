@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Play, Pause, Activity, Send, AlertTriangle, 
   Smartphone, Terminal, CheckCircle2, ShieldCheck, Flame, 
-  PauseCircle, Database, Layers, Square, Hourglass, WifiOff, HelpCircle, Loader2
+  PauseCircle, Database, Layers, Square, Hourglass, WifiOff, HelpCircle, Loader2, Zap, RotateCcw
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { WorkerLog, Campaign } from '../types';
@@ -17,7 +17,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaignUpdate, instanceStatus }) => {
   const [logs, setLogs] = useState<WorkerLog[]>([]);
   const [workerStatus, setWorkerStatus] = useState<'idle'|'running'|'paused'>('idle');
-  const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 50 }); // DEFAULT TO RECOVERY CAP (50)
+  const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 50 }); // DEFAULT TO BASE
   const [stopping, setStopping] = useState(false);
   
   // Modal State
@@ -93,9 +93,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                         <span className="text-sm text-slate-400 uppercase font-bold">Daily Count</span>
                         <span className="text-2xl font-mono font-bold text-slate-700">{dailyStats.sent}</span>
                     </div>
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center border-amber-200 bg-amber-50">
-                        <span className="text-sm text-amber-700 uppercase font-bold">Recovery Cap</span>
-                        <span className="text-2xl font-mono font-bold text-amber-900">{dailyStats.cap}</span>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center border-purple-200 bg-purple-50">
+                        <span className="text-sm text-purple-700 uppercase font-bold">Dynamic Cap</span>
+                        <span className="text-2xl font-mono font-bold text-purple-900">{dailyStats.cap}</span>
                     </div>
                 </div>
               </div>
@@ -132,20 +132,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center gap-6 relative overflow-hidden">
         {/* Active Pulse Background */}
         {workerStatus === 'running' && !isStandby && !isWaitingForConnection && (
-             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500 to-transparent animate-shimmer"></div>
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-purple-500 to-transparent animate-shimmer"></div>
         )}
         {isStandby && (
              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-shimmer"></div>
-        )}
-        {isWaitingForConnection && (
-             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent animate-pulse"></div>
         )}
 
         <div className="flex items-center gap-6 z-10">
             <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shadow-inner ${
                 isStandby ? 'bg-amber-50 text-amber-500' :
                 isWaitingForConnection ? 'bg-red-50 text-red-500' :
-                workerStatus === 'running' ? 'bg-emerald-50 text-emerald-600' : 
+                workerStatus === 'running' ? 'bg-purple-50 text-purple-600' : 
                 'bg-slate-100 text-slate-400'
             }`}>
                 {isStandby ? (
@@ -153,7 +150,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                 ) : isWaitingForConnection ? (
                     <WifiOff size={32} className="animate-pulse" />
                 ) : (
-                    <Activity size={32} className={workerStatus === 'running' ? 'animate-pulse' : ''} />
+                    <Zap size={32} className={workerStatus === 'running' ? 'animate-pulse' : ''} />
                 )}
             </div>
             <div>
@@ -165,20 +162,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                     <span className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide border ${
                         isStandby ? 'bg-amber-100 text-amber-700 border-amber-200' :
                         isWaitingForConnection ? 'bg-red-100 text-red-700 border-red-200' :
-                        workerStatus === 'running' ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 
+                        workerStatus === 'running' ? 'bg-purple-100 text-purple-700 border-purple-200' : 
                         workerStatus === 'paused' ? 'bg-amber-100 text-amber-700 border-amber-200' :
                         'bg-slate-100 text-slate-600 border-slate-200'
                     }`}>
                         <div className={`w-2 h-2 rounded-full ${
                             isStandby ? 'bg-amber-500 animate-pulse' :
                             isWaitingForConnection ? 'bg-red-500 animate-pulse' :
-                            workerStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
+                            workerStatus === 'running' ? 'bg-purple-500 animate-pulse' : 'bg-slate-400'
                         }`}></div>
-                        {isStandby ? 'STANDBY (RECOVERY MODE)' : isWaitingForConnection ? 'WAITING NETWORK' : workerStatus}
+                        {isStandby ? 'LIMIT REACHED (AUTO-SCALING)' : isWaitingForConnection ? 'WAITING NETWORK' : workerStatus === 'running' ? 'SMART SCALING V6' : workerStatus}
                     </span>
                     <span className="text-slate-300">|</span>
                     <span className="text-xs text-slate-500 flex items-center gap-1">
-                        <ShieldCheck size={12} className="text-blue-500" /> Mode Reprise Sécurisée
+                        <Flame size={12} className="text-purple-500" /> Mode Accélération
                     </span>
                 </div>
             </div>
@@ -187,9 +184,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
         <div className="flex items-center gap-2 z-10">
             {/* Control Button */}
             {isStandby ? (
-                 <div className="px-6 py-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 font-bold text-sm flex items-center gap-2">
-                     <Hourglass size={20} />
-                     Limite de reprise atteinte (50/j)
+                 <div className="flex flex-col items-center">
+                    <button 
+                        onClick={toggleCampaign}
+                        disabled={instanceStatus !== 'connected'}
+                        className="flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg bg-amber-100 text-amber-800 border-2 border-amber-200 hover:bg-amber-200 hover:border-amber-300 transition-all shadow-xl hover:-translate-y-1 active:scale-95 disabled:opacity-50"
+                    >
+                        <RotateCcw size={24} />
+                        FORCER RECALCUL
+                    </button>
+                     <span className="text-[10px] text-amber-700 mt-1 uppercase font-semibold">
+                        Limite atteinte ({dailyStats.cap}). Cliquez pour interrompre l'attente.
+                    </span>
                  </div>
             ) : isWaitingForConnection ? (
                  <div className="px-6 py-4 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold text-sm flex items-center gap-2">
@@ -205,7 +211,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                         className={`flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 active:scale-95 ${
                         workerStatus === 'running'
                             ? 'bg-white text-amber-600 border-2 border-amber-100 hover:border-amber-200' 
-                            : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
+                            : 'bg-purple-600 text-white hover:bg-purple-700 shadow-purple-200'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                         {workerStatus === 'running' ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
@@ -239,8 +245,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             {/* Daily Warmup Gauge */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
-                    <Flame size={16} className={dailyPercent > 80 ? 'text-red-500' : 'text-slate-400'} />
-                    Recovery Warm-up Cap
+                    <Flame size={16} className={dailyPercent > 80 ? 'text-red-500' : 'text-purple-400'} />
+                    Dynamic Scalability
                 </h3>
                 <div className="flex items-center justify-center relative h-48">
                     <ResponsiveContainer width="100%" height="100%">
@@ -270,9 +276,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                 </div>
                 <div className="text-center mt-[-30px]">
                     <p className="text-xs text-slate-500 font-medium">
-                        Protection Post-Ban: 
-                        <span className={`ml-1 font-bold ${dailyPercent > 90 ? 'text-amber-600' : 'text-emerald-600'}`}>
-                            {dailyPercent > 90 ? 'MAXIMUM' : 'ACTIF'}
+                        Algorithme : 
+                        <span className={`ml-1 font-bold ${dailyPercent > 90 ? 'text-amber-600' : 'text-purple-600'}`}>
+                            Auto-Scaling (2.5x)
                         </span>
                     </p>
                 </div>
@@ -326,7 +332,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             {/* Pipeline Visualization Bar */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-end mb-4">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Flux de Traitement (Lent)</h3>
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Flux de Traitement</h3>
                     <span className="text-2xl font-black text-slate-900">{progressPercent}%</span>
                 </div>
                 <div className="w-full h-6 bg-slate-100 rounded-full overflow-hidden flex relative">
@@ -348,8 +354,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                 {/* Header */}
                 <div className="bg-slate-900/80 p-3 border-b border-slate-800 flex justify-between items-center backdrop-blur-sm z-10">
                     <div className="flex items-center gap-2">
-                        <Terminal size={14} className="text-emerald-500" />
-                        <span className="text-xs text-slate-300 font-bold">SMARTDOC_RECOVERY_V5</span>
+                        <Terminal size={14} className="text-purple-500" />
+                        <span className="text-xs text-slate-300 font-bold">SMART_SCALING_V6</span>
                     </div>
                     <div className="flex gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/50"></div>
@@ -380,10 +386,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                     
                     {/* Live Cursor */}
                     {workerStatus === 'running' && !isStandby && !isWaitingForConnection && (
-                         <div className="text-emerald-500 text-xs animate-pulse mt-2">_ recovery mode active. ultra-slow processing...</div>
+                         <div className="text-purple-500 text-xs animate-pulse mt-2">_ scaling mode active. adaptive delays engaged...</div>
                     )}
                     {isStandby && (
-                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ recovery limit reached (50/50). sleeping...</div>
+                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ daily limit reached. sleeping for next cycle...</div>
                     )}
                     {isWaitingForConnection && (
                          <div className="text-red-500 text-xs animate-pulse mt-2">_ connection lost. retrying socket handshake...</div>
@@ -392,9 +398,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
 
                 {/* Status Footer */}
                 <div className="bg-slate-900 border-t border-slate-800 p-2 text-[10px] text-slate-500 flex justify-between">
-                    <span>SECURE MODE</span>
-                    <span>DELAY: 30-90s</span>
-                    <span>PROTECTION: MAX</span>
+                    <span>MODE: ACCELERATION</span>
+                    <span>ADAPTIVE DELAY</span>
+                    <span>EXPONENTIAL GROWTH</span>
                 </div>
             </div>
 

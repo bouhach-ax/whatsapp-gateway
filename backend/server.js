@@ -14,16 +14,20 @@ const crypto = require('crypto');
 const SUPABASE_URL = 'https://jccqciuptsyniaxcyfra.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjY3FjaXVwdHN5bmlheGN5ZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5MDY1MzMsImV4cCI6MjA4NjQ4MjUzM30.m-jqjhhnAR2L29lUN99hZOjRIOrj_wogkzJJII8bsU8';
 
-// --- SAFETY CONFIGURATION V5 (POST-BAN RECOVERY MODE) ---
-const MIN_DELAY_MS = 30000; // 30s
-const MAX_DELAY_MS = 90000; // 90s
-const INTERACTIVE_PAUSE_MS = 300000; // 5 mins
-const DAILY_SAFETY_CAP = 50; 
+// --- V6 SMART SCALING CONFIGURATION ---
+const BASE_STARTING_CAP = 50;   
+const MAX_DAILY_LIMIT = 2000;   
+const GROWTH_FACTOR = 2.5;      
 
-const MIN_BATCH_SIZE = 1; 
-const MAX_BATCH_SIZE = 4; 
-const MIN_BATCH_PAUSE = 600000; // 10 minutes
-const MAX_BATCH_PAUSE = 1800000; // 30 minutes
+// Delays
+let CURRENT_MIN_DELAY = 15000; 
+let CURRENT_MAX_DELAY = 45000; 
+const INTERACTIVE_PAUSE_MS = 300000; 
+
+const MIN_BATCH_SIZE = 2; 
+const MAX_BATCH_SIZE = 8; 
+const MIN_BATCH_PAUSE = 300000; 
+const MAX_BATCH_PAUSE = 900000; 
 
 const STOP_KEYWORDS = ['0', 'stop', 'arret', 'arrêt', 'unsubscribe', 'non', 'no', 'quitter', 'pas interessé'];
 
@@ -47,18 +51,50 @@ let activeCampaignId = null;
 let lastInteractiveTime = 0; 
 let isConnecting = false; 
 let consecutiveConflicts = 0; 
+let currentDailyCap = BASE_STARTING_CAP; 
 
-// NEW: In-Memory System Logs (to show pauses in dashboard)
+// NEW: In-Memory System Logs
 let systemLogs = [];
 function addSystemLog(type, message) {
     const log = {
         id: 'sys_' + Date.now() + Math.random(),
         timestamp: new Date(),
-        type: type, // 'info', 'warning', 'success'
+        type: type, 
         message: message
     };
     systemLogs.unshift(log);
-    if (systemLogs.length > 30) systemLogs.pop(); // Keep last 30 events
+    if (systemLogs.length > 30) systemLogs.pop(); 
+}
+
+// --- DYNAMIC CAP CALCULATOR ---
+async function calculateDailyLimit() {
+    try {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yStr = yesterday.toISOString().split('T')[0];
+        
+        const { count: yesterdaySent, error } = await supabase
+            .from('contacts')
+            .select('*', { count: 'exact', head: true })
+            .in('status', ['sent', 'failed']) 
+            .gte('sent_at', `${yStr}T00:00:00.000Z`)
+            .lt('sent_at', `${yStr}T23:59:59.999Z`);
+
+        if (error) {
+            console.error("Error calculating cap:", error);
+            return BASE_STARTING_CAP;
+        }
+
+        let calculated = Math.ceil((yesterdaySent || 10) * GROWTH_FACTOR);
+        
+        if (calculated < BASE_STARTING_CAP) calculated = BASE_STARTING_CAP;
+        if (calculated > MAX_DAILY_LIMIT) calculated = MAX_DAILY_LIMIT;
+
+        console.log(`📊 SMART SCALING: Yesterday=${yesterdaySent} | Today's Limit=${calculated}`);
+        return calculated;
+    } catch (e) {
+        return BASE_STARTING_CAP;
+    }
 }
 
 // --- BROWSER FINGERPRINT GENERATOR ---
@@ -71,7 +107,6 @@ function getRandomBrowserConfig() {
     const minor = Math.floor(Math.random() * 9);
     const build = Math.floor(Math.random() * 5000) + 1000;
     const version = `${major}.0.${build}.${minor}`;
-    console.log(`🎭 Fingerprint: ${platform} / ${browserName} / ${version}`);
     return [platform, browserName, version];
 }
 
@@ -203,12 +238,15 @@ function processTemplate(template, data) {
     return injectInvisibleNoise(text);
 }
 
-// --- WORKER LOOP (V5 POST-BAN) ---
+// --- WORKER LOOP (V6 SMART SCALING) ---
 async function startWorker() {
     if (workerStatus === 'running') return;
     workerStatus = 'running';
-    console.log("🛡️ Intelligent Worker V5 (Post-Ban Recovery) Started");
-    addSystemLog('info', 'Worker V5 Démarré (Mode Récupération)');
+    
+    // RECALCULATE CAP ON START
+    currentDailyCap = await calculateDailyLimit();
+    console.log(`🛡️ Intelligent Worker V6 (Smart Scaling) Started. Daily Limit: ${currentDailyCap}`);
+    addSystemLog('info', `Worker V6 Démarré. Objectif Dynamique: ${currentDailyCap} messages.`);
 
     let messagesSentInCurrentBatch = 0;
     let currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
@@ -219,12 +257,12 @@ async function startWorker() {
         const timeSinceReply = Date.now() - lastInteractiveTime;
         if (timeSinceReply < INTERACTIVE_PAUSE_MS) {
             console.log(`💬 Active Conversation Detected. Pausing.`);
-            addSystemLog('warning', `💬 Réponse détectée. Pause auto de 5min pour discussion.`);
+            addSystemLog('warning', `💬 Réponse détectée. Pause auto.`);
             await delay(15000); 
             continue;
         }
 
-        // 2. Strict Daily Cap
+        // 2. CHECK DYNAMIC CAP (INTERRUPTIBLE SLEEP UPDATE)
         const todayStr = new Date().toISOString().split('T')[0];
         const { count: dailyTotal, error: countError } = await supabase
             .from('contacts')
@@ -232,20 +270,30 @@ async function startWorker() {
             .in('status', ['sent', 'failed', 'invalid', 'blacklisted']) 
             .gte('sent_at', `${todayStr}T00:00:00.000Z`);
 
-        if (!countError && dailyTotal >= DAILY_SAFETY_CAP) {
-            console.log(`⏳ RECOVERY CAP REACHED.`);
-            addSystemLog('warning', `⏳ Limite journalière atteinte (${dailyTotal}/${DAILY_SAFETY_CAP}). Reprise demain.`);
-            await delay(20 * 60 * 1000); 
+        if (!countError && dailyTotal >= currentDailyCap) {
+            console.log(`⏳ DAILY LIMIT REACHED (${dailyTotal}/${currentDailyCap}).`);
+            addSystemLog('warning', `⏳ Limite atteinte (${currentDailyCap}). En attente...`);
+            
+            // Interruptible sleep loop: Checks status every 5 seconds
+            const checkInterval = 5000;
+            const maxWait = 20 * 60 * 1000; // 20 mins max wait block
+            let waited = 0;
+            
+            while (waited < maxWait && workerStatus === 'running') {
+                await delay(checkInterval);
+                waited += checkInterval;
+            }
+            // If workerStatus became 'paused' during sleep, the main loop will exit naturally at the next iteration
             continue; 
         }
 
-        // 3. Batches & Long Breaks (THE LOGIC YOU SAW)
+        // 3. Batches
         if (messagesSentInCurrentBatch >= currentBatchTarget) {
             const pauseDuration = Math.floor(Math.random() * (MAX_BATCH_PAUSE - MIN_BATCH_PAUSE + 1)) + MIN_BATCH_PAUSE;
             const pauseMinutes = Math.floor(pauseDuration / 60000);
             
             console.log(`☕ HUMAN PAUSE: ${pauseMinutes}m.`);
-            addSystemLog('info', `☕ PAUSE CAFÉ : Repos de ${pauseMinutes} minutes après ${messagesSentInCurrentBatch} messages.`);
+            addSystemLog('info', `☕ Micro-Pause : ${pauseMinutes} min.`);
             
             try {
                 if (sock) {
@@ -262,7 +310,7 @@ async function startWorker() {
             messagesSentInCurrentBatch = 0;
             currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
             console.log(`🚀 Resuming.`);
-            addSystemLog('info', `🚀 Reprise de l'activité. Prochain lot : ${currentBatchTarget} messages.`);
+            addSystemLog('info', `🚀 Reprise. Batch: ${currentBatchTarget}.`);
             continue; 
         }
 
@@ -300,7 +348,7 @@ async function startWorker() {
 
         if (error || !contact) {
             console.log(`Campaign finished.`);
-            addSystemLog('success', 'Campagne terminée avec succès.');
+            addSystemLog('success', 'Campagne terminée.');
             await supabase.from('campaigns').update({ status: 'completed', completed_at: new Date() }).eq('id', activeCampaignId);
             activeCampaignId = null; 
             continue; 
@@ -334,16 +382,11 @@ async function startWorker() {
         // --- SENDING LOGIC ---
         try {
             await sock.sendPresenceUpdate('available', jid);
-            await delay(Math.random() * 3000 + 2000);
+            await delay(Math.random() * 2000 + 1000); // Faster initial presence
 
             await sock.sendPresenceUpdate('composing', jid);
-            await delay(Math.random() * 4000 + 2000);
-            await sock.sendPresenceUpdate('paused', jid);
-            await delay(Math.random() * 3000 + 2000);
-            await sock.sendPresenceUpdate('composing', jid);
-            const remainingTyping = Math.min(15000, Math.max(3000, message.length * 60)); 
-            await delay(remainingTyping);
-
+            await delay(Math.random() * 3000 + 1000);
+            
             await sock.sendMessage(jid, { text: message });
             
             await supabase.from('contacts').update({ status: 'sent', sent_at: new Date() }).eq('id', contact.id);
@@ -352,10 +395,15 @@ async function startWorker() {
             const currentDaily = (dailyTotal || 0) + 1;
             console.log(`✅ SENT to ${contact.phone}`);
             
-            await delay(4000);
+            await delay(2000);
             await sock.sendPresenceUpdate('unavailable', jid);
 
-            const nextDelay = Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
+            // ADAPTIVE DELAY: If volume is high, we can go faster safely
+            const speedFactor = currentDailyCap > 200 ? 0.7 : 1; // 30% faster if cap > 200
+            const minD = CURRENT_MIN_DELAY * speedFactor;
+            const maxD = CURRENT_MAX_DELAY * speedFactor;
+
+            const nextDelay = Math.floor(Math.random() * (maxD - minD + 1)) + minD;
             console.log(`💤 Sleeping for ${Math.round(nextDelay/1000)}s...`);
             await delay(nextDelay);
 
@@ -574,7 +622,7 @@ fastify.get('/campaigns/current', async () => {
     const todayStr = new Date().toISOString().split('T')[0];
     const { count: dailySent } = await supabase.from('contacts').select('*', { count: 'exact', head: true }).in('status', ['sent', 'failed', 'invalid', 'blacklisted']).gte('sent_at', `${todayStr}T00:00:00.000Z`);
 
-    if (!campaign) return { active: false, dailySent: dailySent || 0, dailyCap: DAILY_SAFETY_CAP };
+    if (!campaign) return { active: false, dailySent: dailySent || 0, dailyCap: currentDailyCap };
 
     const { count: sent } = await supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('campaign_id', campaign.id).eq('status', 'sent');
     const { count: failed } = await supabase.from('contacts').select('*', { count: 'exact', head: true }).eq('campaign_id', campaign.id).in('status', ['failed', 'invalid', 'blacklisted']);
@@ -604,7 +652,7 @@ fastify.get('/campaigns/current', async () => {
         active: true,
         workerStatus: campaign.status === 'completed' ? 'idle' : workerStatus,
         dailySent: dailySent || 0,
-        dailyCap: DAILY_SAFETY_CAP,
+        dailyCap: currentDailyCap,
         campaign: { ...campaign, totalContacts: total, sentCount: sent, failedCount: failed, pendingCount: pending },
         logs: combinedLogs
     };
