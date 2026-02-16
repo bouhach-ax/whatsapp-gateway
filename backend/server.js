@@ -52,6 +52,7 @@ let lastInteractiveTime = 0;
 let isConnecting = false; 
 let consecutiveConflicts = 0; 
 let currentDailyCap = BASE_STARTING_CAP; 
+let interruptSleep = false; // NEW FLAG TO WAKE UP WORKER
 
 // NEW: In-Memory System Logs
 let systemLogs = [];
@@ -242,17 +243,19 @@ function processTemplate(template, data) {
 async function startWorker() {
     if (workerStatus === 'running') return;
     workerStatus = 'running';
+    interruptSleep = false;
     
-    // RECALCULATE CAP ON START
-    currentDailyCap = await calculateDailyLimit();
-    console.log(`🛡️ Intelligent Worker V6 (Smart Scaling) Started. Daily Limit: ${currentDailyCap}`);
-    addSystemLog('info', `Worker V6 Démarré. Objectif Dynamique: ${currentDailyCap} messages.`);
+    console.log(`🛡️ Intelligent Worker V6 (Smart Scaling) Started.`);
+    addSystemLog('info', `Worker V6 Démarré. Calcul des quotas en cours...`);
 
     let messagesSentInCurrentBatch = 0;
     let currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
 
     while (workerStatus === 'running') {
         
+        // 0. ALWAYS RECALCULATE CAP ON EVERY CYCLE TO CATCH UPDATES
+        currentDailyCap = await calculateDailyLimit();
+
         // 1. Interactive Pause
         const timeSinceReply = Date.now() - lastInteractiveTime;
         if (timeSinceReply < INTERACTIVE_PAUSE_MS) {
@@ -274,17 +277,24 @@ async function startWorker() {
             console.log(`⏳ DAILY LIMIT REACHED (${dailyTotal}/${currentDailyCap}).`);
             addSystemLog('warning', `⏳ Limite atteinte (${currentDailyCap}). En attente...`);
             
-            // Interruptible sleep loop: Checks status every 5 seconds
-            const checkInterval = 5000;
+            // Interruptible sleep loop
+            const checkInterval = 2000;
             const maxWait = 20 * 60 * 1000; // 20 mins max wait block
             let waited = 0;
             
-            while (waited < maxWait && workerStatus === 'running') {
+            // Break loop if status changes OR if interrupt flag is set
+            while (waited < maxWait && workerStatus === 'running' && !interruptSleep) {
                 await delay(checkInterval);
                 waited += checkInterval;
             }
-            // If workerStatus became 'paused' during sleep, the main loop will exit naturally at the next iteration
-            continue; 
+
+            if (interruptSleep) {
+                console.log("⚡ Worker forced awake!");
+                addSystemLog('info', "⚡ Worker réveillé manuellement ! Recalcul...");
+                interruptSleep = false; // Reset flag
+            }
+            
+            continue; // Loop back to top to Recalculate Cap
         }
 
         // 3. Batches
@@ -302,11 +312,17 @@ async function startWorker() {
             } catch(e) {}
 
             const increments = 100;
+            const stepMs = pauseDuration / increments;
             for (let i = 0; i < increments; i++) {
-                if (workerStatus !== 'running') break;
-                await delay(pauseDuration / increments);
+                if (workerStatus !== 'running' || interruptSleep) break;
+                await delay(stepMs);
             }
             
+            if (interruptSleep) {
+                 addSystemLog('info', "⚡ Pause interrompue !");
+                 interruptSleep = false;
+            }
+
             messagesSentInCurrentBatch = 0;
             currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
             console.log(`🚀 Resuming.`);
@@ -658,11 +674,21 @@ fastify.get('/campaigns/current', async () => {
     };
 });
 
+// NEW: Force Continue Endpoint
+fastify.post('/campaigns/force_continue', async () => {
+    if (workerStatus === 'running') {
+        interruptSleep = true; // Signals the loop to break wait
+        return { success: true, message: "Interrupt signal sent" };
+    }
+    return { success: false, message: "Worker not running" };
+});
+
 // ... (Rest of routes same as before)
 fastify.post('/campaigns/toggle', async () => {
     if (!activeCampaignId) return { error: "No active" };
     if (workerStatus === 'running') {
         workerStatus = 'paused';
+        interruptSleep = true; // Break loops
         addSystemLog('warning', 'Campagne mise en pause manuellement.');
         await supabase.from('campaigns').update({ status: 'paused' }).eq('id', activeCampaignId);
     } else {
@@ -687,6 +713,7 @@ fastify.post('/campaigns/stop', async () => {
     }
     addSystemLog('error', 'Campagne stoppée définitivement.');
     workerStatus = 'idle';
+    interruptSleep = true; 
     activeCampaignId = null;
     return { success: true };
 });

@@ -287,6 +287,16 @@ export const api = {
       }
   },
 
+  // NEW: FORCE CONTINUE
+  async forceContinue(): Promise<any> {
+    try {
+        const res = await fetch(`${API_URL}/campaigns/force_continue`, { method: 'POST' });
+        return res.json();
+    } catch (e) {
+        return {};
+    }
+  },
+
   async stopCampaign(): Promise<any> {
       try {
           const res = await fetch(`${API_URL}/campaigns/stop`, { method: 'POST' });

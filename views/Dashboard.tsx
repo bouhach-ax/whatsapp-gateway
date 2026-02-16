@@ -19,6 +19,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
   const [workerStatus, setWorkerStatus] = useState<'idle'|'running'|'paused'>('idle');
   const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 50 }); // DEFAULT TO BASE
   const [stopping, setStopping] = useState(false);
+  const [isForcing, setIsForcing] = useState(false);
   
   // Modal State
   const [showStopModal, setShowStopModal] = useState(false);
@@ -55,6 +56,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
 
   const toggleCampaign = async () => {
     await api.toggleCampaign();
+  };
+
+  const handleForceRecalc = async () => {
+    setIsForcing(true);
+    try {
+        await api.forceContinue();
+        // Give visual feedback
+        setTimeout(() => setIsForcing(false), 1000);
+    } catch (e) {
+        setIsForcing(false);
+    }
   };
 
   const handleStopClick = () => {
@@ -186,12 +198,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             {isStandby ? (
                  <div className="flex flex-col items-center">
                     <button 
-                        onClick={toggleCampaign}
-                        disabled={instanceStatus !== 'connected'}
+                        onClick={handleForceRecalc}
+                        disabled={instanceStatus !== 'connected' || isForcing}
                         className="flex items-center gap-3 px-8 py-4 rounded-xl font-bold text-lg bg-amber-100 text-amber-800 border-2 border-amber-200 hover:bg-amber-200 hover:border-amber-300 transition-all shadow-xl hover:-translate-y-1 active:scale-95 disabled:opacity-50"
                     >
-                        <RotateCcw size={24} />
-                        FORCER RECALCUL
+                        {isForcing ? <Loader2 className="animate-spin" size={24} /> : <RotateCcw size={24} />}
+                        {isForcing ? 'RECALCUL...' : 'FORCER RECALCUL'}
                     </button>
                      <span className="text-[10px] text-amber-700 mt-1 uppercase font-semibold">
                         Limite atteinte ({dailyStats.cap}). Cliquez pour interrompre l'attente.
@@ -389,7 +401,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                          <div className="text-purple-500 text-xs animate-pulse mt-2">_ scaling mode active. adaptive delays engaged...</div>
                     )}
                     {isStandby && (
-                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ daily limit reached. sleeping for next cycle...</div>
+                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ daily limit reached. waiting for signal...</div>
                     )}
                     {isWaitingForConnection && (
                          <div className="text-red-500 text-xs animate-pulse mt-2">_ connection lost. retrying socket handshake...</div>
