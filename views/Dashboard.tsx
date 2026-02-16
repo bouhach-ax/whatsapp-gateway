@@ -17,7 +17,7 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaignUpdate, instanceStatus }) => {
   const [logs, setLogs] = useState<WorkerLog[]>([]);
   const [workerStatus, setWorkerStatus] = useState<'idle'|'running'|'paused'>('idle');
-  const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 250 });
+  const [dailyStats, setDailyStats] = useState({ sent: 0, cap: 50 }); // DEFAULT TO RECOVERY CAP (50)
   const [stopping, setStopping] = useState(false);
   
   // Modal State
@@ -93,9 +93,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                         <span className="text-sm text-slate-400 uppercase font-bold">Daily Count</span>
                         <span className="text-2xl font-mono font-bold text-slate-700">{dailyStats.sent}</span>
                     </div>
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center">
-                        <span className="text-sm text-slate-400 uppercase font-bold">Daily Cap</span>
-                        <span className="text-2xl font-mono font-bold text-slate-700">{dailyStats.cap}</span>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col items-center border-amber-200 bg-amber-50">
+                        <span className="text-sm text-amber-700 uppercase font-bold">Recovery Cap</span>
+                        <span className="text-2xl font-mono font-bold text-amber-900">{dailyStats.cap}</span>
                     </div>
                 </div>
               </div>
@@ -111,7 +111,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
   
   // Daily Warmup Gauge Data (Safe Defaults)
   const currentSent = dailyStats.sent || 0;
-  const currentCap = dailyStats.cap || 250;
+  const currentCap = dailyStats.cap || 50;
   const dailyPercent = Math.min(100, Math.round((currentSent / currentCap) * 100));
   const gaugeColor = dailyPercent > 90 ? '#ef4444' : dailyPercent > 70 ? '#f59e0b' : '#10b981';
   
@@ -174,11 +174,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                             isWaitingForConnection ? 'bg-red-500 animate-pulse' :
                             workerStatus === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
                         }`}></div>
-                        {isStandby ? 'STANDBY (LIMIT)' : isWaitingForConnection ? 'WAITING NETWORK' : workerStatus}
+                        {isStandby ? 'STANDBY (RECOVERY MODE)' : isWaitingForConnection ? 'WAITING NETWORK' : workerStatus}
                     </span>
                     <span className="text-slate-300">|</span>
                     <span className="text-xs text-slate-500 flex items-center gap-1">
-                        <ShieldCheck size={12} className="text-blue-500" /> Mode Paranoïaque Actif
+                        <ShieldCheck size={12} className="text-blue-500" /> Mode Reprise Sécurisée
                     </span>
                 </div>
             </div>
@@ -189,7 +189,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             {isStandby ? (
                  <div className="px-6 py-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 font-bold text-sm flex items-center gap-2">
                      <Hourglass size={20} />
-                     En attente de demain...
+                     Limite de reprise atteinte (50/j)
                  </div>
             ) : isWaitingForConnection ? (
                  <div className="px-6 py-4 bg-red-50 border border-red-200 rounded-xl text-red-700 font-bold text-sm flex items-center gap-2">
@@ -240,7 +240,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
                 <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-2">
                     <Flame size={16} className={dailyPercent > 80 ? 'text-red-500' : 'text-slate-400'} />
-                    Daily Warm-up Cap
+                    Recovery Warm-up Cap
                 </h3>
                 <div className="flex items-center justify-center relative h-48">
                     <ResponsiveContainer width="100%" height="100%">
@@ -270,9 +270,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                 </div>
                 <div className="text-center mt-[-30px]">
                     <p className="text-xs text-slate-500 font-medium">
-                        Risque Bannissement: 
-                        <span className={`ml-1 font-bold ${dailyPercent > 90 ? 'text-red-600' : 'text-emerald-600'}`}>
-                            {dailyPercent > 90 ? 'CRITIQUE' : dailyPercent > 50 ? 'MODÉRÉ' : 'FAIBLE'}
+                        Protection Post-Ban: 
+                        <span className={`ml-1 font-bold ${dailyPercent > 90 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                            {dailyPercent > 90 ? 'MAXIMUM' : 'ACTIF'}
                         </span>
                     </p>
                 </div>
@@ -326,7 +326,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
             {/* Pipeline Visualization Bar */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-end mb-4">
-                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Flux de Traitement</h3>
+                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Flux de Traitement (Lent)</h3>
                     <span className="text-2xl font-black text-slate-900">{progressPercent}%</span>
                 </div>
                 <div className="w-full h-6 bg-slate-100 rounded-full overflow-hidden flex relative">
@@ -349,7 +349,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                 <div className="bg-slate-900/80 p-3 border-b border-slate-800 flex justify-between items-center backdrop-blur-sm z-10">
                     <div className="flex items-center gap-2">
                         <Terminal size={14} className="text-emerald-500" />
-                        <span className="text-xs text-slate-300 font-bold">SMARTDOC_CORE_V2.1</span>
+                        <span className="text-xs text-slate-300 font-bold">SMARTDOC_RECOVERY_V5</span>
                     </div>
                     <div className="flex gap-1.5">
                         <div className="w-2.5 h-2.5 rounded-full bg-red-500/20 border border-red-500/50"></div>
@@ -380,10 +380,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
                     
                     {/* Live Cursor */}
                     {workerStatus === 'running' && !isStandby && !isWaitingForConnection && (
-                         <div className="text-emerald-500 text-xs animate-pulse mt-2">_ cursor active. processing queue...</div>
+                         <div className="text-emerald-500 text-xs animate-pulse mt-2">_ recovery mode active. ultra-slow processing...</div>
                     )}
                     {isStandby && (
-                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ standby mode. waiting for next cycle...</div>
+                         <div className="text-amber-500 text-xs animate-pulse mt-2">_ recovery limit reached (50/50). sleeping...</div>
                     )}
                     {isWaitingForConnection && (
                          <div className="text-red-500 text-xs animate-pulse mt-2">_ connection lost. retrying socket handshake...</div>
@@ -392,9 +392,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ activeCampaign, onCampaign
 
                 {/* Status Footer */}
                 <div className="bg-slate-900 border-t border-slate-800 p-2 text-[10px] text-slate-500 flex justify-between">
-                    <span>MEM: 50MB</span>
-                    <span>LATENCY: 24ms</span>
-                    <span>UPTIME: 99.9%</span>
+                    <span>SECURE MODE</span>
+                    <span>DELAY: 30-90s</span>
+                    <span>PROTECTION: MAX</span>
                 </div>
             </div>
 

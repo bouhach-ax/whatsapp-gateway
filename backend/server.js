@@ -14,18 +14,19 @@ const crypto = require('crypto');
 const SUPABASE_URL = 'https://jccqciuptsyniaxcyfra.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjY3FjaXVwdHN5bmlheGN5ZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5MDY1MzMsImV4cCI6MjA4NjQ4MjUzM30.m-jqjhhnAR2L29lUN99hZOjRIOrj_wogkzJJII8bsU8';
 
-// --- SAFETY CONFIGURATION V4 (POLYMORPHIC) ---
-const MIN_DELAY_MS = 20000; // Increased to 20s
-const MAX_DELAY_MS = 60000; // Increased to 60s
-const INTERACTIVE_PAUSE_MS = 180000; // 3 mins pause if user replies
-const DAILY_SAFETY_CAP = 80; // ⚠️ EXTREME CAUTION MODE ACTIVATED
+// --- SAFETY CONFIGURATION V5 (POST-BAN RECOVERY MODE) ---
+// Based on Meta's "Responsible Use" guidelines: Slow down, prioritize interaction.
+const MIN_DELAY_MS = 30000; // 30 seconds minimum (Slowed down)
+const MAX_DELAY_MS = 90000; // 90 seconds maximum (Very slow)
+const INTERACTIVE_PAUSE_MS = 300000; // 5 minutes pause if user replies (Give time to chat)
+const DAILY_SAFETY_CAP = 50; // ⚠️ RECOVERY LIMIT: Strict 50/day limit to warm up the number
 
-const MIN_BATCH_SIZE = 2;
-const MAX_BATCH_SIZE = 5;
-const MIN_BATCH_PAUSE = 400000; // ~7 mins
-const MAX_BATCH_PAUSE = 1200000; // ~20 mins
+const MIN_BATCH_SIZE = 1; // Send as low as 1 message at a time
+const MAX_BATCH_SIZE = 4; // Max 4 messages burst
+const MIN_BATCH_PAUSE = 600000; // 10 minutes break
+const MAX_BATCH_PAUSE = 1800000; // 30 minutes break (Longer coffee breaks)
 
-const STOP_KEYWORDS = ['0', 'stop', 'arret', 'arrêt', 'unsubscribe', 'non', 'no', 'quitter'];
+const STOP_KEYWORDS = ['0', 'stop', 'arret', 'arrêt', 'unsubscribe', 'non', 'no', 'quitter', 'pas interessé'];
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { persistSession: false }
@@ -50,19 +51,20 @@ let consecutiveConflicts = 0;
 
 // --- BROWSER FINGERPRINT GENERATOR (POLYMORPHIC IDENTITY) ---
 function getRandomBrowserConfig() {
-    const platforms = ['Windows', 'macOS', 'Ubuntu', 'Linux'];
-    const browsers = ['Chrome', 'Firefox', 'Edge', 'Safari'];
+    // We rotate mostly desktop OSs to look like a pro agent using WA Web
+    const platforms = ['Windows', 'macOS']; 
+    const browsers = ['Chrome', 'Firefox', 'Edge'];
     
     const platform = platforms[Math.floor(Math.random() * platforms.length)];
     const browserName = browsers[Math.floor(Math.random() * browsers.length)];
     
-    // Generate a semi-realistic version number (e.g., 124.0.0.0)
-    const major = Math.floor(Math.random() * (126 - 120 + 1)) + 120;
+    // Recent versions only to look legitimate
+    const major = Math.floor(Math.random() * (126 - 122 + 1)) + 122;
     const minor = Math.floor(Math.random() * 9);
     const build = Math.floor(Math.random() * 5000) + 1000;
     const version = `${major}.0.${build}.${minor}`;
 
-    console.log(`🎭 Generating New Fingerprint: ${platform} / ${browserName} / ${version}`);
+    console.log(`🎭 Generating Recovery Fingerprint: ${platform} / ${browserName} / ${version}`);
     return [platform, browserName, version];
 }
 
@@ -170,6 +172,7 @@ function formatPhoneNumber(phone) {
 }
 
 function injectInvisibleNoise(text) {
+    // Invisible characters to prevent hash matching of bulk messages
     const zeroWidthChars = ['\u200B', '\u200C', '\u200D', '\u2060', '\uFEFF'];
     let suffix = '';
     const suffixLen = Math.floor(Math.random() * 3) + 1; 
@@ -194,26 +197,27 @@ function processTemplate(template, data) {
     return injectInvisibleNoise(text);
 }
 
-// --- WORKER LOOP (V4 POLYMORPHIC) ---
+// --- WORKER LOOP (V5 POST-BAN) ---
 async function startWorker() {
     if (workerStatus === 'running') return;
     workerStatus = 'running';
-    console.log("🛡️ Intelligent Worker V4 (Polymorphic Stealth) Started");
+    console.log("🛡️ Intelligent Worker V5 (Post-Ban Recovery) Started");
 
     let messagesSentInCurrentBatch = 0;
     let currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
 
     while (workerStatus === 'running') {
         
-        // 1. Pause Logic
+        // 1. Interactive Pause (CRITICAL FOR META COMPLIANCE)
+        // "Communicate with contacts you know" -> If they reply, we stop spamming and let the human take over.
         const timeSinceReply = Date.now() - lastInteractiveTime;
         if (timeSinceReply < INTERACTIVE_PAUSE_MS) {
-            console.log(`💬 Conversation active. Campaign paused.`);
-            await delay(10000); 
+            console.log(`💬 Active Conversation Detected. Pausing automation to prioritize human reply.`);
+            await delay(15000); // Check again in 15s
             continue;
         }
 
-        // 2. Daily Cap
+        // 2. Strict Daily Cap (Recovery Mode)
         const todayStr = new Date().toISOString().split('T')[0];
         const { count: dailyTotal, error: countError } = await supabase
             .from('contacts')
@@ -222,25 +226,22 @@ async function startWorker() {
             .gte('sent_at', `${todayStr}T00:00:00.000Z`);
 
         if (!countError && dailyTotal >= DAILY_SAFETY_CAP) {
-            console.log(`⏳ DAILY CAP REACHED (${dailyTotal}/${DAILY_SAFETY_CAP}).`);
-            await delay(15 * 60 * 1000);
+            console.log(`⏳ RECOVERY CAP REACHED (${dailyTotal}/${DAILY_SAFETY_CAP}). Stopping for today.`);
+            await delay(20 * 60 * 1000); // Sleep 20 mins
             continue; 
         }
 
-        // 3. Batching & Human Pause
+        // 3. Batches & Long Breaks
         if (messagesSentInCurrentBatch >= currentBatchTarget) {
             const pauseDuration = Math.floor(Math.random() * (MAX_BATCH_PAUSE - MIN_BATCH_PAUSE + 1)) + MIN_BATCH_PAUSE;
             const pauseMinutes = Math.floor(pauseDuration / 60000);
             console.log(`☕ HUMAN PAUSE: ${pauseMinutes}m (Batch ${messagesSentInCurrentBatch} done).`);
             
-            // Interaction Check during pause: Read random messages if any
-            // This simulates a user picking up their phone just to check notification bar
+            // Randomly go online/offline during break to look alive
             try {
                 if (sock) {
-                    // Logic to clear presence occasionally
-                    await sock.sendPresenceUpdate('available'); 
-                    await delay(2000);
-                    await sock.sendPresenceUpdate('unavailable');
+                   if(Math.random() > 0.5) await sock.sendPresenceUpdate('unavailable');
+                   else await sock.sendPresenceUpdate('available');
                 }
             } catch(e) {}
 
@@ -252,10 +253,11 @@ async function startWorker() {
             
             messagesSentInCurrentBatch = 0;
             currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
-            console.log(`🚀 Resuming. Next batch: ${currentBatchTarget}.`);
+            console.log(`🚀 Resuming. Next small batch: ${currentBatchTarget}.`);
             continue; 
         }
 
+        // 4. Get Active Campaign
         if (!activeCampaignId) {
             const { data: campaigns } = await supabase.from('campaigns').select('id').eq('status', 'running').order('created_at', { ascending: false }).limit(1);
             if (campaigns && campaigns.length > 0) {
@@ -280,6 +282,7 @@ async function startWorker() {
             continue;
         }
 
+        // 5. Fetch Contact
         const { data: contact, error } = await supabase
             .from('contacts')
             .select('*')
@@ -320,25 +323,25 @@ async function startWorker() {
         if (!campaignData) { activeCampaignId = null; continue; }
         const message = processTemplate(campaignData.template, contact.data);
 
-        // --- ADVANCED HUMAN SIMULATION ---
+        // --- ADVANCED HUMAN SIMULATION (V5) ---
         try {
-            // 1. Initial Presence (Looking at phone)
+            // 1. "Online" status
             await sock.sendPresenceUpdate('available', jid);
-            await delay(Math.random() * 2000 + 1000);
+            await delay(Math.random() * 3000 + 2000);
 
-            // 2. Typing with Hesitation (The "Human Touch")
+            // 2. Typing with Hesitation
             await sock.sendPresenceUpdate('composing', jid);
             
-            // First chunk of typing
-            await delay(Math.random() * 3000 + 2000);
+            // Type for a bit
+            await delay(Math.random() * 4000 + 2000);
             
-            // "Hesitation" - Stop typing, as if reading or correcting
+            // Stop typing (thinking)
             await sock.sendPresenceUpdate('paused', jid);
-            await delay(Math.random() * 2000 + 1000);
+            await delay(Math.random() * 3000 + 2000);
             
             // Resume typing
             await sock.sendPresenceUpdate('composing', jid);
-            const remainingTyping = Math.min(10000, Math.max(2000, message.length * 50));
+            const remainingTyping = Math.min(15000, Math.max(3000, message.length * 60)); // Slower typing simulation
             await delay(remainingTyping);
 
             // 3. Send
@@ -350,12 +353,13 @@ async function startWorker() {
             const currentDaily = (dailyTotal || 0) + 1;
             console.log(`✅ SENT to ${contact.phone} (D:${currentDaily} | B:${messagesSentInCurrentBatch}/${currentBatchTarget})`);
             
-            // 4. Post-Send Behavior
-            // Do not immediately go offline. Stay "online" for a few seconds like a human watching for ticks.
-            await delay(3000);
+            // 4. Post-Send Linger
+            await delay(4000);
             await sock.sendPresenceUpdate('unavailable', jid);
 
+            // 5. EXTENDED DELAY (Recovery Mode)
             const nextDelay = Math.floor(Math.random() * (MAX_DELAY_MS - MIN_DELAY_MS + 1)) + MIN_DELAY_MS;
+            console.log(`💤 Sleeping for ${Math.round(nextDelay/1000)}s...`);
             await delay(nextDelay);
 
         } catch (err) {
@@ -407,16 +411,14 @@ async function connectToWhatsApp() {
         sock.ev.on('messages.upsert', async ({ messages, type }) => {
             if (type !== 'notify') return;
             for (const m of messages) {
-                // AUTO-READ LOGIC: If we receive a message, we must look like we read it eventually
-                // This improves the Trust Score significantly.
+                // AUTO-READ LOGIC: Simulate reading incoming messages
                 if (!m.key.fromMe) {
-                    // 30% chance to read immediately, otherwise ignore for now (simulate busy human)
-                    if (Math.random() > 0.7) {
+                    // Randomly read incoming messages to look human
+                    if (Math.random() > 0.6) {
                         try {
-                            await delay(Math.random() * 5000 + 2000);
-                            // New Baileys syntax for read receipts
+                            await delay(Math.random() * 8000 + 2000);
                             await sock.readMessages([m.key]);
-                            console.log(`👀 Simulated Read Receipt for ${m.key.remoteJid}`);
+                            console.log(`👀 Read Receipt sent for ${m.key.remoteJid}`);
                         } catch(e) {}
                     }
                     
@@ -425,12 +427,13 @@ async function connectToWhatsApp() {
                         const cleanText = text.trim().toLowerCase();
                         const senderPhone = m.key.remoteJid.split('@')[0];
 
-                        if (STOP_KEYWORDS.includes(cleanText)) {
+                        if (STOP_KEYWORDS.some(kw => cleanText.includes(kw))) {
                             console.log(`🛑 OPT-OUT: ${senderPhone}`);
                             await supabase.from('blacklist').upsert({ phone: senderPhone, reason: 'user_opt_out' });
                             await supabase.from('contacts').update({ status: 'blacklisted' }).eq('phone', senderPhone).eq('status', 'pending');
                         } else {
-                            console.log(`📩 Reply from ${senderPhone}. Pausing.`);
+                            // INTERACTION DETECTED: Pause automation
+                            console.log(`📩 Reply from ${senderPhone}. Pausing automation for 5 minutes.`);
                             lastInteractiveTime = Date.now();
                         }
                     }
@@ -596,7 +599,7 @@ fastify.get('/campaigns/current', async () => {
     }));
 
     if (Date.now() - lastInteractiveTime < INTERACTIVE_PAUSE_MS) {
-        logs.unshift({ id: 'pause_sys', timestamp: new Date().toLocaleTimeString(), type: 'warning', message: "⚠️ PAUSED: User replied." });
+        logs.unshift({ id: 'pause_sys', timestamp: new Date().toLocaleTimeString(), type: 'warning', message: "⚠️ PAUSED: User replied to a message." });
     }
 
     return {
@@ -609,6 +612,7 @@ fastify.get('/campaigns/current', async () => {
     };
 });
 
+// ... (Rest of routes same as before)
 fastify.post('/campaigns/toggle', async () => {
     if (!activeCampaignId) return { error: "No active" };
     if (workerStatus === 'running') {
@@ -674,7 +678,6 @@ fastify.get('/campaigns/:id/contacts', async (req) => {
     return data;
 });
 
-// List Routes (omitted for brevity, same as before)
 fastify.post('/lists', async (req) => {
     const { name, contacts, mapping } = req.body;
     const { data: list, error: errList } = await supabase.from('contact_lists').insert({ name, total_contacts: contacts.length }).select().single();

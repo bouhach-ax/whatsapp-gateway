@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { FileSpreadsheet, ArrowRight, Keyboard, Save, PlayCircle, AlertCircle, CheckCircle2, Loader2, Plus, Trash2, Edit2, X, ChevronLeft, ChevronRight, Users, Download, Cloud, Shuffle, Wand2, Phone } from 'lucide-react';
+import { FileSpreadsheet, ArrowRight, Keyboard, Save, PlayCircle, AlertCircle, CheckCircle2, Loader2, Plus, Trash2, Edit2, X, ChevronLeft, ChevronRight, Users, Download, Cloud, Shuffle, Wand2, Phone, Lightbulb } from 'lucide-react';
 import Papa from 'papaparse';
 import { Campaign } from '../types';
 import { api } from '../services/api';
@@ -608,6 +608,18 @@ export const CampaignBuilder: React.FC<CampaignBuilderProps> = ({ onCreateCampai
         {step === 4 && (
           <div className="grid grid-cols-1 lg:grid-cols-2 h-full">
             <div className="p-8 border-r border-slate-200 flex flex-col bg-white">
+               
+               {/* POST-BAN SAFETY TIP */}
+               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex gap-3">
+                   <Lightbulb className="text-amber-500 shrink-0" size={24} />
+                   <div>
+                       <h4 className="font-bold text-amber-800 text-sm mb-1">Mode Reprise d'Activité</h4>
+                       <p className="text-xs text-amber-700 leading-relaxed">
+                           Pour respecter les règles "Contact connu", évitez les liens directs. Posez une question simple pour inciter à la réponse (ex: <em>"Bonjour Dr, êtes-vous disponible pour le dossier de Mme X ?"</em>). Si le médecin répond, le système mettra en pause l'automate pour vous laisser discuter.
+                       </p>
+                   </div>
+               </div>
+
                <div className="mb-6">
                   <label className="block text-sm font-bold text-slate-800 mb-2 uppercase tracking-wide">Nom de la Campagne</label>
                   <input 
