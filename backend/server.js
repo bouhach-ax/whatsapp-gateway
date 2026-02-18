@@ -14,20 +14,20 @@ const crypto = require('crypto');
 const SUPABASE_URL = 'https://jccqciuptsyniaxcyfra.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpjY3FjaXVwdHN5bmlheGN5ZnJhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA5MDY1MzMsImV4cCI6MjA4NjQ4MjUzM30.m-jqjhhnAR2L29lUN99hZOjRIOrj_wogkzJJII8bsU8';
 
-// --- V6 SMART SCALING CONFIGURATION ---
-const BASE_STARTING_CAP = 50;   
-const MAX_DAILY_LIMIT = 2000;   
-const GROWTH_FACTOR = 2.5;      
+// --- V9 HIGH VELOCITY CONFIGURATION ---
+// AGGRESSIVE MARKETING MODE.
+const BASE_STARTING_CAP = 200;  // START HIGH
+const MAX_DAILY_LIMIT = 2000;   // GOAL
+const DAILY_INCREMENT = 200;    // AGGRESSIVE SCALING
 
-// Delays
-let CURRENT_MIN_DELAY = 15000; 
-let CURRENT_MAX_DELAY = 45000; 
-const INTERACTIVE_PAUSE_MS = 300000; 
+// BURST DELAYS (Fast but randomized)
+let CURRENT_MIN_DELAY = 8000;   // 8 seconds (Fast human)
+let CURRENT_MAX_DELAY = 25000;  // 25 seconds
 
-const MIN_BATCH_SIZE = 2; 
-const MAX_BATCH_SIZE = 8; 
-const MIN_BATCH_PAUSE = 300000; 
-const MAX_BATCH_PAUSE = 900000; 
+// BURST LOGIC
+const BURST_SIZE_MIN = 10;
+const BURST_SIZE_MAX = 20;
+const BURST_COOLDOWN_MS = 300000; // 5 minutes cool-down after a burst
 
 const STOP_KEYWORDS = ['0', 'stop', 'arret', 'arrêt', 'unsubscribe', 'non', 'no', 'quitter', 'pas interessé'];
 
@@ -51,8 +51,9 @@ let activeCampaignId = null;
 let lastInteractiveTime = 0; 
 let isConnecting = false; 
 let consecutiveConflicts = 0; 
+let consecutiveFailures = 0; 
 let currentDailyCap = BASE_STARTING_CAP; 
-let interruptSleep = false; // NEW FLAG TO WAKE UP WORKER
+let interruptSleep = false; 
 
 // NEW: In-Memory System Logs
 let systemLogs = [];
@@ -67,7 +68,7 @@ function addSystemLog(type, message) {
     if (systemLogs.length > 30) systemLogs.pop(); 
 }
 
-// --- DYNAMIC CAP CALCULATOR ---
+// --- DYNAMIC CAP CALCULATOR (V9 AGGRESSIVE) ---
 async function calculateDailyLimit() {
     try {
         const yesterday = new Date();
@@ -81,17 +82,17 @@ async function calculateDailyLimit() {
             .gte('sent_at', `${yStr}T00:00:00.000Z`)
             .lt('sent_at', `${yStr}T23:59:59.999Z`);
 
-        if (error) {
-            console.error("Error calculating cap:", error);
-            return BASE_STARTING_CAP;
-        }
+        if (error) return BASE_STARTING_CAP;
 
-        let calculated = Math.ceil((yesterdaySent || 10) * GROWTH_FACTOR);
+        // V9: Aggressive scaling. 
+        // Even if yesterday was low, we allow a high start because the user wants volume.
+        let calculated = (yesterdaySent || 0) + DAILY_INCREMENT;
         
+        // Ensure minimum baseline is high
         if (calculated < BASE_STARTING_CAP) calculated = BASE_STARTING_CAP;
         if (calculated > MAX_DAILY_LIMIT) calculated = MAX_DAILY_LIMIT;
 
-        console.log(`📊 SMART SCALING: Yesterday=${yesterdaySent} | Today's Limit=${calculated}`);
+        console.log(`🔥 V9 VELOCITY: Yesterday=${yesterdaySent} | Today's Limit=${calculated}`);
         return calculated;
     } catch (e) {
         return BASE_STARTING_CAP;
@@ -104,10 +105,10 @@ function getRandomBrowserConfig() {
     const browsers = ['Chrome', 'Firefox', 'Edge'];
     const platform = platforms[Math.floor(Math.random() * platforms.length)];
     const browserName = browsers[Math.floor(Math.random() * browsers.length)];
-    const major = Math.floor(Math.random() * (126 - 122 + 1)) + 122;
-    const minor = Math.floor(Math.random() * 9);
-    const build = Math.floor(Math.random() * 5000) + 1000;
-    const version = `${major}.0.${build}.${minor}`;
+    const major = 122; 
+    const minor = 0;
+    const build = Math.floor(Math.random() * 9999);
+    const version = `${major}.${minor}.${build}`;
     return [platform, browserName, version];
 }
 
@@ -214,10 +215,12 @@ function formatPhoneNumber(phone) {
     return cleaned;
 }
 
+// V9: Return to Invisible Noise to bypass Hash Checking
+// Since we want volume, we need to make sure every message has a unique hash
 function injectInvisibleNoise(text) {
     const zeroWidthChars = ['\u200B', '\u200C', '\u200D', '\u2060', '\uFEFF'];
     let suffix = '';
-    const suffixLen = Math.floor(Math.random() * 3) + 1; 
+    const suffixLen = Math.floor(Math.random() * 5) + 2; 
     for (let i = 0; i < suffixLen; i++) {
         suffix += zeroWidthChars[Math.floor(Math.random() * zeroWidthChars.length)];
     }
@@ -236,36 +239,37 @@ function processTemplate(template, data) {
         const options = group.split('|');
         return options[Math.floor(Math.random() * options.length)];
     });
+    // In V9 we use both Spintax AND Noise for maximum safety at speed
     return injectInvisibleNoise(text);
 }
 
-// --- WORKER LOOP (V6 SMART SCALING) ---
+// --- WORKER LOOP (V9 HIGH VELOCITY) ---
 async function startWorker() {
     if (workerStatus === 'running') return;
     workerStatus = 'running';
     interruptSleep = false;
+    consecutiveFailures = 0;
     
-    console.log(`🛡️ Intelligent Worker V6 (Smart Scaling) Started.`);
-    addSystemLog('info', `Worker V6 Démarré. Calcul des quotas en cours...`);
+    // RECALCULATE CAP ON START
+    currentDailyCap = await calculateDailyLimit();
+    console.log(`🔥 V9 HIGH VELOCITY ENGAGED.`);
+    addSystemLog('info', `🔥 PROTOCOLE V9 ACTIVÉ. Mode Haute Performance.`);
 
-    let messagesSentInCurrentBatch = 0;
-    let currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
+    let messagesSentInBurst = 0;
+    let currentBurstTarget = Math.floor(Math.random() * (BURST_SIZE_MAX - BURST_SIZE_MIN + 1)) + BURST_SIZE_MIN;
 
     while (workerStatus === 'running') {
         
-        // 0. ALWAYS RECALCULATE CAP ON EVERY CYCLE TO CATCH UPDATES
-        currentDailyCap = await calculateDailyLimit();
-
-        // 1. Interactive Pause
+        // 1. Interactive Pause (Shortened for V9)
         const timeSinceReply = Date.now() - lastInteractiveTime;
-        if (timeSinceReply < INTERACTIVE_PAUSE_MS) {
-            console.log(`💬 Active Conversation Detected. Pausing.`);
-            addSystemLog('warning', `💬 Réponse détectée. Pause auto.`);
-            await delay(15000); 
+        if (timeSinceReply < 120000) { // Only 2 mins pause for replies in V9
+            console.log(`💬 Reply detected. Short pause.`);
+            addSystemLog('warning', `💬 Réponse reçue. Pause courte (2min).`);
+            await delay(10000); 
             continue;
         }
 
-        // 2. CHECK DYNAMIC CAP (INTERRUPTIBLE SLEEP UPDATE)
+        // 2. CHECK DYNAMIC CAP
         const todayStr = new Date().toISOString().split('T')[0];
         const { count: dailyTotal, error: countError } = await supabase
             .from('contacts')
@@ -275,58 +279,50 @@ async function startWorker() {
 
         if (!countError && dailyTotal >= currentDailyCap) {
             console.log(`⏳ DAILY LIMIT REACHED (${dailyTotal}/${currentDailyCap}).`);
-            addSystemLog('warning', `⏳ Limite atteinte (${currentDailyCap}). En attente...`);
+            addSystemLog('warning', `⏳ Limite Volumétrique (${currentDailyCap}). En attente...`);
             
-            // Interruptible sleep loop
+            // Interruptible sleep
             const checkInterval = 2000;
-            const maxWait = 20 * 60 * 1000; // 20 mins max wait block
+            const maxWait = 10 * 60 * 1000; // Check every 10 mins
             let waited = 0;
-            
-            // Break loop if status changes OR if interrupt flag is set
             while (waited < maxWait && workerStatus === 'running' && !interruptSleep) {
                 await delay(checkInterval);
                 waited += checkInterval;
             }
-
-            if (interruptSleep) {
-                console.log("⚡ Worker forced awake!");
-                addSystemLog('info', "⚡ Worker réveillé manuellement ! Recalcul...");
-                interruptSleep = false; // Reset flag
+            if (interruptSleep) { 
+                console.log("⚡ FORCE CONTINUE");
+                addSystemLog('success', "⚡ Reprise forcée par l'admin.");
+                interruptSleep = false; 
             }
-            
-            continue; // Loop back to top to Recalculate Cap
+            continue; 
         }
 
-        // 3. Batches
-        if (messagesSentInCurrentBatch >= currentBatchTarget) {
-            const pauseDuration = Math.floor(Math.random() * (MAX_BATCH_PAUSE - MIN_BATCH_PAUSE + 1)) + MIN_BATCH_PAUSE;
-            const pauseMinutes = Math.floor(pauseDuration / 60000);
-            
-            console.log(`☕ HUMAN PAUSE: ${pauseMinutes}m.`);
-            addSystemLog('info', `☕ Micro-Pause : ${pauseMinutes} min.`);
+        // 3. BURST & COOL-DOWN LOGIC
+        if (messagesSentInBurst >= currentBurstTarget) {
+            const cooldownMins = Math.floor(BURST_COOLDOWN_MS / 60000);
+            console.log(`❄️ COOL-DOWN: ${cooldownMins}m after ${messagesSentInBurst} msgs.`);
+            addSystemLog('info', `❄️ Refroidissement Algo : ${cooldownMins} min.`);
             
             try {
-                if (sock) {
-                   if(Math.random() > 0.5) await sock.sendPresenceUpdate('unavailable');
-                }
+                if (sock) await sock.sendPresenceUpdate('unavailable');
             } catch(e) {}
 
             const increments = 100;
-            const stepMs = pauseDuration / increments;
+            const stepMs = BURST_COOLDOWN_MS / increments;
             for (let i = 0; i < increments; i++) {
                 if (workerStatus !== 'running' || interruptSleep) break;
                 await delay(stepMs);
             }
             
             if (interruptSleep) {
-                 addSystemLog('info', "⚡ Pause interrompue !");
+                 addSystemLog('info', "⚡ Cool-down sauté !");
                  interruptSleep = false;
             }
 
-            messagesSentInCurrentBatch = 0;
-            currentBatchTarget = Math.floor(Math.random() * (MAX_BATCH_SIZE - MIN_BATCH_SIZE + 1)) + MIN_BATCH_SIZE;
-            console.log(`🚀 Resuming.`);
-            addSystemLog('info', `🚀 Reprise. Batch: ${currentBatchTarget}.`);
+            messagesSentInBurst = 0;
+            currentBurstTarget = Math.floor(Math.random() * (BURST_SIZE_MAX - BURST_SIZE_MIN + 1)) + BURST_SIZE_MIN;
+            console.log(`🚀 STARTING NEW BURST.`);
+            addSystemLog('info', `🚀 Nouvelle Salve (Burst) de ${currentBurstTarget} messages.`);
             continue; 
         }
 
@@ -384,49 +380,55 @@ async function startWorker() {
             const [result] = await sock.onWhatsApp(jid);
             if (!result || !result.exists) {
                 await supabase.from('contacts').update({ status: 'invalid', error_message: 'Not on WA', sent_at: new Date() }).eq('id', contact.id);
-                await delay(2000);
+                await delay(1000);
                 continue;
             }
         } catch (e) {
-            await delay(5000);
+            await delay(3000);
         }
 
         const { data: campaignData } = await supabase.from('campaigns').select('template').eq('id', activeCampaignId).single();
         if (!campaignData) { activeCampaignId = null; continue; }
         const message = processTemplate(campaignData.template, contact.data);
 
-        // --- SENDING LOGIC ---
+        // --- SENDING LOGIC (V9 FAST) ---
         try {
-            await sock.sendPresenceUpdate('available', jid);
-            await delay(Math.random() * 2000 + 1000); // Faster initial presence
-
+            // Minimal Presence Update for Speed
             await sock.sendPresenceUpdate('composing', jid);
-            await delay(Math.random() * 3000 + 1000);
             
+            // Fast typing: 2-5 seconds only
+            const typingTime = Math.random() * 3000 + 2000;
+            await delay(typingTime);
+            
+            // Send
             await sock.sendMessage(jid, { text: message });
             
             await supabase.from('contacts').update({ status: 'sent', sent_at: new Date() }).eq('id', contact.id);
             
-            messagesSentInCurrentBatch++;
-            const currentDaily = (dailyTotal || 0) + 1;
+            messagesSentInBurst++;
+            consecutiveFailures = 0;
             console.log(`✅ SENT to ${contact.phone}`);
             
-            await delay(2000);
-            await sock.sendPresenceUpdate('unavailable', jid);
+            // Very short post-send delay in V9
+            await delay(1000);
 
-            // ADAPTIVE DELAY: If volume is high, we can go faster safely
-            const speedFactor = currentDailyCap > 200 ? 0.7 : 1; // 30% faster if cap > 200
-            const minD = CURRENT_MIN_DELAY * speedFactor;
-            const maxD = CURRENT_MAX_DELAY * speedFactor;
-
-            const nextDelay = Math.floor(Math.random() * (maxD - minD + 1)) + minD;
-            console.log(`💤 Sleeping for ${Math.round(nextDelay/1000)}s...`);
+            // Short interval between messages in a burst
+            const nextDelay = Math.floor(Math.random() * (CURRENT_MAX_DELAY - CURRENT_MIN_DELAY + 1)) + CURRENT_MIN_DELAY;
+            console.log(`⚡ Next in: ${Math.round(nextDelay/1000)}s`);
             await delay(nextDelay);
 
         } catch (err) {
             console.error("Send Error:", err);
+            consecutiveFailures++;
             await supabase.from('contacts').update({ status: 'failed', error_message: err.message, sent_at: new Date() }).eq('id', contact.id);
-            await delay(10000);
+            
+            if (consecutiveFailures >= 5) { // More tolerant in V9
+                 addSystemLog('error', "🚨 Trop d'échecs. Pause 5 min.");
+                 await delay(300000); 
+                 consecutiveFailures = 0;
+            } else {
+                 await delay(5000);
+            }
         }
     }
 }
@@ -459,7 +461,7 @@ async function connectToWhatsApp() {
             auth: state,
             printQRInTerminal: false,
             browser: browserConfig, 
-            syncFullHistory: false,
+            syncFullHistory: false, 
             connectTimeoutMs: 60000,
             retryRequestDelayMs: 2000,
             keepAliveIntervalMs: 10000,
@@ -472,9 +474,10 @@ async function connectToWhatsApp() {
             if (type !== 'notify') return;
             for (const m of messages) {
                 if (!m.key.fromMe) {
-                    if (Math.random() > 0.6) {
+                    // In V9 we read messages quickly to look like an active agent
+                    if (Math.random() > 0.2) {
                         try {
-                            await delay(Math.random() * 8000 + 2000);
+                            await delay(2000);
                             await sock.readMessages([m.key]);
                         } catch(e) {}
                     }
@@ -486,12 +489,12 @@ async function connectToWhatsApp() {
 
                         if (STOP_KEYWORDS.some(kw => cleanText.includes(kw))) {
                             console.log(`🛑 OPT-OUT: ${senderPhone}`);
-                            addSystemLog('warning', `🛑 Désinscription détectée : ${senderPhone}`);
+                            addSystemLog('warning', `🛑 Désinscription : ${senderPhone}`);
                             await supabase.from('blacklist').upsert({ phone: senderPhone, reason: 'user_opt_out' });
                             await supabase.from('contacts').update({ status: 'blacklisted' }).eq('phone', senderPhone).eq('status', 'pending');
                         } else {
-                            console.log(`📩 Reply from ${senderPhone}. Pausing.`);
-                            addSystemLog('warning', `📩 Nouveau message de ${senderPhone}. Pause de courtoisie activée.`);
+                            console.log(`📩 Reply from ${senderPhone}.`);
+                            addSystemLog('warning', `📩 Réponse de ${senderPhone}.`);
                             lastInteractiveTime = Date.now();
                         }
                     }
@@ -722,7 +725,8 @@ fastify.post('/campaigns/test', async (req) => {
     const { phone, message } = req.body;
     if (!sock || connectionStatus !== 'connected') throw new Error('WhatsApp not connected');
     const jid = formatPhoneNumber(phone);
-    const finalMessage = injectInvisibleNoise(message);
+    // V9: USE INVISIBLE NOISE FOR SPEED
+    const finalMessage = injectInvisibleNoise(message); 
     await sock.sendPresenceUpdate('composing', jid);
     await delay(1000); 
     await sock.sendMessage(jid, { text: finalMessage });
